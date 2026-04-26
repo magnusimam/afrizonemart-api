@@ -1,0 +1,55 @@
+// Prisma schema — Afrizonemart 2.0
+// Generates a typed Prisma Client used by the modules in src/modules/**.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------
+// Catalog domain (Principle #7 DDD: products belong to the products
+// module on the application side; the schema mirrors the domain).
+// -----------------------------------------------------------------
+
+model Category {
+  id        String    @id @default(cuid())
+  slug      String    @unique
+  name      String
+  image     String?
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Product {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  name         String
+  brand        String?
+  description  String?  @db.Text
+  // Money is stored as integers in the smallest currency unit (kobo for NGN
+  // = 1/100 of a Naira). This avoids floating-point rounding errors entirely.
+  price        Int
+  comparePrice Int?
+  origin       String?  // 2-letter ISO country code, e.g. "NG", "KE"
+  inStock      Boolean  @default(true)
+  rating       Float    @default(0)
+  reviewCount  Int      @default(0)
+  // Image URLs as a JSON array — flexible without a side table for now.
+  images       String[]
+  // Schema-Driven attributes (Principle #4) will live here later as JSON:
+  // attributes  Json @default("{}")
+
+  categoryId   String?
+  category     Category? @relation(fields: [categoryId], references: [id])
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([origin])
+}

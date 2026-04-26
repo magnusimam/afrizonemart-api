@@ -1,0 +1,13 @@
+# Railway deployment configuration — Principle #8 (Infrastructure as Code)
+# This file is read by Railway on every deploy.
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install && npm run prisma:generate && npm run build"
+
+[deploy]
+startCommand = "npm run prisma:migrate deploy && node dist/server.js"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
