@@ -5,32 +5,134 @@ import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
 import { logAudit } from '@/modules/audit/service';
 import type { PaymentGateway, WebhookOutcome } from './gateway';
-import { GtSquadGateway } from './gtsquad-gateway';
+import { buildGateway } from './registry';
 import { StubGateway } from './stub-gateway';
 
 const stub = new StubGateway();
-const squad =
-  env.SQUAD_SECRET_KEY && env.SQUAD_ENVIRONMENT
-    ? new GtSquadGateway(env.SQUAD_SECRET_KEY, env.SQUAD_ENVIRONMENT)
-    : null;
-
-logger.info('payments.gateway_selected', {
-  gateway: squad ? `squad (${env.SQUAD_ENVIRONMENT})` : 'stub',
-});
 
 /**
- * Pick the active gateway. Squad if its keys are configured; otherwise
- * the local stub. Same `PaymentGateway` interface either way — callers
- * never know which one they're talking to.
+ * Loads active PaymentGatewayConfig rows for a given currency, ordered
+ * by priority (lowest number first).
  */
-export function activeGateway(): PaymentGateway {
-  return squad ?? stub;
+async function loadActiveConfigs(currency?: string) {
+  return prisma.paymentGatewayConfig.findMany({
+    where: {
+      isActive: true,
+      ...(currency ? { currencies: { has: currency } } : {}),
+    },
+    orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+  });
 }
 
-function gatewayById(id: string): PaymentGateway {
-  if (id === 'squad' && squad) return squad;
+/**
+ * Public-shape gateway summary returned to the storefront for the
+ * checkout picker. Never includes credentials.
+ */
+export interface PublicGatewaySummary {
+  id: string;
+  provider: string;
+  label: string;
+  environment: string;
+  currencies: string[];
+  metadata: Record<string, unknown>;
+}
+
+export async function listPublicGateways(currency?: string): Promise<PublicGatewaySummary[]> {
+  const rows = await loadActiveConfigs(currency);
+  return rows.map((r) => ({
+    id: r.id,
+    provider: r.provider,
+    label: r.label,
+    environment: r.environment,
+    currencies: r.currencies,
+    metadata: r.metadata as Record<string, unknown>,
+  }));
+}
+
+/**
+ * Returns every active gateway, in priority order. Used by the webhook
+ * handler to dispatch incoming deliveries — each gateway gets a chance
+ * to recognise the signature.
+ */
+export async function activeGateways(currency?: string): Promise<PaymentGateway[]> {
+  const configs = await loadActiveConfigs(currency);
+  if (configs.length > 0) {
+    return configs.map((cfg) =>
+      buildGateway({
+        provider: cfg.provider,
+        environment: cfg.environment,
+        credentials: cfg.credentials as Record<string, unknown>,
+      }),
+    );
+  }
+  if (env.SQUAD_SECRET_KEY && env.SQUAD_ENVIRONMENT) {
+    return [
+      buildGateway({
+        provider: 'squad',
+        environment: env.SQUAD_ENVIRONMENT,
+        credentials: { secretKey: env.SQUAD_SECRET_KEY },
+      }),
+    ];
+  }
+  return [stub];
+}
+
+/**
+ * Pick the highest-priority active gateway for an order. Falls back to
+ * env-configured Squad (legacy boot path), then to the StubGateway so
+ * local dev never breaks. New deploys are encouraged to migrate via
+ * admin → Payment Gateways.
+ */
+export async function activeGateway(currency?: string): Promise<PaymentGateway> {
+  const configs = await loadActiveConfigs(currency);
+  if (configs.length > 0) {
+    const cfg = configs[0];
+    return buildGateway({
+      provider: cfg.provider,
+      environment: cfg.environment,
+      credentials: cfg.credentials as Record<string, unknown>,
+    });
+  }
+  if (env.SQUAD_SECRET_KEY && env.SQUAD_ENVIRONMENT) {
+    return buildGateway({
+      provider: 'squad',
+      environment: env.SQUAD_ENVIRONMENT,
+      credentials: { secretKey: env.SQUAD_SECRET_KEY },
+    });
+  }
   return stub;
 }
+
+/**
+ * Looks up a specific gateway by its config ID (or by provider key as
+ * a legacy fallback). Used by the checkout picker which tells us which
+ * one the customer chose.
+ */
+async function gatewayById(id: string): Promise<PaymentGateway> {
+  if (id) {
+    const cfg = await prisma.paymentGatewayConfig.findUnique({ where: { id } });
+    if (cfg && cfg.isActive) {
+      return buildGateway({
+        provider: cfg.provider,
+        environment: cfg.environment,
+        credentials: cfg.credentials as Record<string, unknown>,
+      });
+    }
+  }
+  // Legacy: callers used to pass 'squad' literally. Resolve via env.
+  if (id === 'squad' && env.SQUAD_SECRET_KEY && env.SQUAD_ENVIRONMENT) {
+    return buildGateway({
+      provider: 'squad',
+      environment: env.SQUAD_ENVIRONMENT,
+      credentials: { secretKey: env.SQUAD_SECRET_KEY },
+    });
+  }
+  return stub;
+}
+
+logger.info('payments.gateway_selection', {
+  source: 'PaymentGatewayConfig table (with env fallback)',
+});
 
 export async function initPayment(orderId: string, userId: string) {
   const order = await prisma.order.findUnique({
@@ -43,7 +145,7 @@ export async function initPayment(orderId: string, userId: string) {
     throw HttpError.badRequest(`Order is already ${order.status}`);
   }
 
-  const gw = activeGateway();
+  const gw = await activeGateway(order.currency);
   const callbackUrl = `${process.env.WEB_URL ?? 'http://localhost:3000'}/checkout/success?order=${order.orderNumber}`;
   const init = await gw.init({
     orderId: order.id,
@@ -145,7 +247,7 @@ export async function verifyPayment(gatewayRef: string, userId: string) {
 
   // If the webhook hasn't landed yet, ask the gateway directly.
   if (payment.status === 'INITIATED') {
-    const gw = gatewayById(payment.gateway);
+    const gw = await gatewayById(payment.gateway);
     const outcome = await gw.verify(gatewayRef);
     await applyWebhookOutcome(outcome);
   }
@@ -190,7 +292,7 @@ export async function checkOrderPayment(orderIdOrNumber: string, userId: string)
     return { orderStatus: order.status, orderNumber: order.orderNumber };
   }
 
-  const gw = gatewayById(latest.gateway);
+  const gw = await gatewayById(latest.gateway);
   const outcome = await gw.verify(latest.gatewayRef);
   await applyWebhookOutcome(outcome);
 

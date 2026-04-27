@@ -83,6 +83,7 @@ model Product {
   reviews           Review[]
   cartItems         CartItem[]
   orderItems        OrderItem[]
+  placements        ProductPlacement[]
 
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -541,6 +542,219 @@ model Notification {
   @@index([createdAt])
 }
 
+// ------------------------------------------------------------------
+// Phase 10.7 — Featured Placements
+//
+// Lets admins manually decide where each product appears across the
+// site (homepage shelves, hero, curated landing pages, CMS pages…)
+// in addition to the auto-derived behaviours (on-sale, new arrival,
+// category, country). Every row is a (product, placement-key) pairing
+// with optional time window and country scope.
+//
+// Placement keys come from a hardcoded registry plus dynamic
+// `cms:<page-slug>` keys for CMS-page features.
+// ------------------------------------------------------------------
+
+model ProductPlacement {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// e.g. "homepage_hero", "for_her", "cms:black-friday"
+  placement   String
+  /// Lower number = higher priority. Used to sort within a placement.
+  sortOrder   Int      @default(100)
+  /// Optional time window. NULL = no constraint on that side.
+  startsAt    DateTime?
+  endsAt      DateTime?
+  /// Optional country scope. Empty array = global (all countries).
+  /// Otherwise only requests with a matching `country` code see this.
+  countries   String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([productId, placement])
+  @@index([placement, sortOrder])
+}
+
+// ------------------------------------------------------------------
+// Phase 10.6 — CMS / Page Builder
+//
+// Marketing-editable static-ish pages. Blocks JSON tree is rendered by
+// the storefront's catch-all `[...slug]` route. Slug is the URL path
+// after the domain, e.g. "about-us" or "deals/black-friday".
+// ------------------------------------------------------------------
+
+model CmsPage {
+  id            String   @id @default(cuid())
+  // URL path — unique. No leading slash. Use slashes for nesting.
+  slug          String   @unique
+  title         String
+  // SEO meta description.
+  metaDescription String? @db.Text
+  // Body — array of blocks (hero / rich-text / image / image-grid / cta /
+  // product-carousel). Renderer in components/cms/render-page.tsx
+  blocks        Json     @default("[]")
+  isPublished   Boolean  @default(false)
+  publishedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([isPublished])
+}
+
+// ------------------------------------------------------------------
+// Phase 10.5 — Business Rules Engine (Principle #3)
+//
+// Generic if/then rules editable from admin. Each rule is scoped to
+// where it runs (cart, order, fulfilment, …). The engine takes a
+// context object and a scope; returns the merged actions of all
+// matching rules in priority order.
+//
+// Conditions JSON is a tree of simple matchers (eq/neq/gte/lte/in/all/any).
+// Actions JSON is a free-form map the host module interprets — e.g.
+// `{ freeShipping: true }`, `{ discountPercent: 10 }`,
+// `{ requireApproval: true, reason: "high-value" }`.
+//
+// Pragmatic scope today: rules are EVALUATED but their actions are only
+// honored in modules that opt in. New rule callers land progressively.
+// ------------------------------------------------------------------
+
+model BusinessRule {
+  id          String   @id @default(cuid())
+  scope       String   // "cart", "order", "fulfilment", "discount", …
+  key         String
+  name        String
+  description String?  @db.Text
+  isActive    Boolean  @default(true)
+  // Lower number = evaluated first.
+  priority    Int      @default(100)
+  // Tree of matchers — see service/rules.ts for the DSL.
+  conditions  Json     @default("{}")
+  // Free-form actions object. Host module decides what fields it cares
+  // about (e.g. cart cares about `freeShipping` + `discountPercent`).
+  actions     Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([scope, key])
+  @@index([scope, isActive, priority])
+}
+
+// ------------------------------------------------------------------
+// Phase 10.4 — Feature Flags (Principle #2)
+//
+// Each flag has a default value (used when no targeting rule fires)
+// plus a list of targeting rules evaluated in order. The first matching
+// rule wins. Targeting context comes from the API request (userId,
+// userRole, country) and is opaque to the engine — rules use json-logic
+// or a tiny custom DSL stored in `targetingRules`.
+//
+// Rule shape:
+//   [
+//     { match: { userRole: "ADMIN" }, value: true },
+//     { match: { country: ["NG","KE"] }, value: true },
+//     { match: { rolloutPercent: 10 }, value: true },
+//   ]
+// ------------------------------------------------------------------
+
+model FeatureFlag {
+  id              String   @id @default(cuid())
+  // Stable key referenced from code (e.g. `useFlag('new_checkout')`).
+  key             String   @unique
+  name            String
+  description     String?  @db.Text
+  // Default boolean; non-boolean variants land in a future iteration.
+  defaultValue    Boolean  @default(false)
+  // Ordered list of targeting rules — first match wins.
+  targetingRules  Json     @default("[]")
+  // Master kill-switch. When false the flag always returns
+  // defaultValue without evaluating rules.
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([key])
+}
+
+// ------------------------------------------------------------------
+// Phase 10.3 — Email Template Editor (Principle #4 Schema-Driven Design)
+//
+// One row per transactional email type ("order.confirmed",
+// "user.welcome", …). The body is a JSON tree of blocks
+// (`{type:'Heading',text:'…'}`, `{type:'Button',label:'…',href:'{trackUrl}'}`,
+// `{type:'Row',children:[…]}`, …). At send time the dispatcher renders
+// the tree using `templates/render-blocks.tsx` and ships it via Resend.
+//
+// Templates can reference template variables via `{like_this}` syntax;
+// the dispatcher substitutes from the event payload at send time.
+// ------------------------------------------------------------------
+
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  // Unique event key — must match a key the dispatcher emits
+  // ("order.confirmed", "user.welcome", "password.reset", …).
+  type        String   @unique
+  // Human-readable name shown in admin.
+  name        String
+  // Subject line — supports `{variable}` substitution.
+  subject     String
+  // Block tree — see render-blocks.tsx for the supported block types.
+  // Authored from /admin/email-templates.
+  body        Json     @default("[]")
+  // Marketing-editable preview text (the snippet shown in the inbox
+  // list under the subject). Optional.
+  preview     String?
+  // When false the dispatcher falls back to the hardcoded TSX
+  // template — handy if someone breaks a template in admin.
+  isActive    Boolean  @default(true)
+  // Soft system flag: templates seeded from code start as system.
+  // Admin can edit but not delete them.
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+}
+
+// ------------------------------------------------------------------
+// Phase 10.2 — Payment Gateway Registry (Principle #6 Pluggable Providers)
+//
+// One row per configured gateway. The `provider` column points at a
+// code-side factory (`squad`, `paystack`, `stub`, ...). Adding a brand-new
+// kind of provider takes one new file in `payments/providers/` plus a
+// registry entry; the rest is data.
+// ------------------------------------------------------------------
+
+model PaymentGatewayConfig {
+  id             String   @id @default(cuid())
+  // Stable code key that maps to a registered factory class.
+  provider       String
+  // Human-readable label shown to the customer at checkout
+  // (e.g. "Card / Squad", "Bank Transfer (Paystack)").
+  label          String
+  // sandbox / live — providers usually have separate base URLs + keys.
+  environment    String   @default("sandbox")
+  // Hot toggle from admin without redeploying.
+  isActive       Boolean  @default(true)
+  // Lower number = higher in the checkout list.
+  priority       Int      @default(100)
+  // Currencies this config can process (ISO 4217). Storefront filters
+  // to gateways that accept the order's currency.
+  currencies     String[] @default(["NGN"])
+  // Provider-specific credentials. JSON so each provider can store
+  // whatever shape it needs (Stripe has publishableKey + secretKey,
+  // Paystack has secretKey + publicKey, M-Pesa has shortCode + ...).
+  // NEVER returned to non-admin clients.
+  credentials    Json     @default("{}")
+  // Free-form non-secret metadata (display order, supported channels,
+  // marketing copy) shown alongside the picker on the storefront.
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([isActive, priority])
+}
+
 model PasswordResetToken {
   id         String    @id @default(cuid())
   userId     String
@@ -554,4 +768,64 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// ------------------------------------------------------------------
+// Phase 10.1 — Custom Field Registry (Principle #4 Schema-Driven Design)
+//
+// Lets non-devs add new product attributes (and later: order/user
+// attributes) without code changes. A `CustomFieldDef` row defines the
+// shape (name, type, validation); per-record values land in the host
+// model's existing `attributes` Json column under the same key. No
+// migration required to add a new field.
+// ------------------------------------------------------------------
+
+enum CustomFieldScope {
+  PRODUCT
+  ORDER
+  USER
+}
+
+enum CustomFieldType {
+  TEXT          // single-line text
+  LONGTEXT      // multi-line / textarea
+  NUMBER        // integer or decimal — uses min/max in `options`
+  BOOLEAN       // checkbox
+  URL           // generic URL — rendered as link
+  VIDEO         // YouTube / Vimeo / direct mp4 URL — rendered as embed
+  IMAGE         // image URL — rendered as <Image>
+  SELECT        // dropdown — choices in `options.choices: string[]`
+  JSON          // raw JSON for power users
+  RICHTEXT      // HTML/markdown body
+}
+
+model CustomFieldDef {
+  id          String           @id @default(cuid())
+  scope       CustomFieldScope
+  // Stable key used inside the host's `attributes` JSON. Lowercase,
+  // underscored. Once set, do not change — old records keep using it.
+  key         String
+  // Human-readable name shown in admin and on the storefront.
+  label       String
+  // Optional helper text shown under the field in admin.
+  description String?
+  type        CustomFieldType
+  required    Boolean          @default(false)
+  // Display weight — lower = higher up. Used for both admin form and
+  // storefront render order.
+  sortOrder   Int              @default(100)
+  // Type-specific config. Examples:
+  //   SELECT  → { choices: ["red","blue"] }
+  //   NUMBER  → { min: 0, max: 100, step: 1 }
+  //   VIDEO   → { provider: "youtube"|"vimeo"|"mp4" } (auto-detected if omitted)
+  //   IMAGE   → { aspectRatio: "16:9" }
+  options     Json             @default("{}")
+  // When false the def is hidden from admin forms but old values are
+  // preserved on records — soft-delete pattern.
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([scope, key])
+  @@index([scope, isActive, sortOrder])
 }

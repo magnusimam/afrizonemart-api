@@ -18,6 +18,9 @@ import { productRoutes } from '@/modules/products/routes';
 import { shippingRoutes } from '@/modules/shipping/routes';
 import { uploadRoutes } from '@/modules/uploads/routes';
 import { paymentRoutes } from '@/modules/payments/routes';
+import { customFieldRoutes } from '@/modules/custom-fields/routes';
+import { featureFlagRoutes } from '@/modules/feature-flags/routes';
+import { cmsRoutes } from '@/modules/cms/routes';
 import { startWebhookDispatcher } from '@/modules/webhooks/dispatcher';
 import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
 
@@ -86,6 +89,9 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/shipping', shippingRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/custom-fields', customFieldRoutes);
+app.use('/api/flags', featureFlagRoutes);
+app.use('/api/pages', cmsRoutes);
 app.use('/api/admin', adminRouter);
 
 // Terminal handlers

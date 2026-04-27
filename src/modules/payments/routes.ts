@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Request, Response } from 'express';
 import { asyncHandler } from '@/middleware/async-handler';
 import { requireAuth } from '@/middleware/auth';
 import {
@@ -8,8 +9,19 @@ import {
   verifyHandler,
   webhookHandler,
 } from './controller';
+import { listPublicGateways } from './service';
 
 export const paymentRoutes = Router();
+
+// Public — storefront checkout reads the active gateway list to render
+// the payment-method picker. Filters by currency.
+paymentRoutes.get(
+  '/gateways',
+  asyncHandler(async (req: Request, res: Response) => {
+    const currency = typeof req.query.currency === 'string' ? req.query.currency : undefined;
+    res.json({ items: await listPublicGateways(currency) });
+  }),
+);
 
 paymentRoutes.post('/init', requireAuth, asyncHandler(initPaymentHandler));
 paymentRoutes.get('/verify/:reference', requireAuth, asyncHandler(verifyHandler));

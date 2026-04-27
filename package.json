@@ -6,7 +6,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "tsc && tsc-alias",
     "start": "node dist/server.js",
     "lint": "echo \"(eslint not configured yet)\"",
     "prisma:generate": "prisma generate",
@@ -56,6 +56,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "prisma": "^5.22.0",
+    "tsc-alias": "^1.8.16",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

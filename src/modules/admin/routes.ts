@@ -12,7 +12,16 @@ import { adminSettingsRoutes } from '@/modules/settings/admin.routes';
 import { adminAuditRoutes } from '@/modules/audit/admin.routes';
 import { adminWebhookRoutes } from '@/modules/webhooks/admin.routes';
 import { adminReportRoutes } from '@/modules/reports/admin.routes';
-import { adminNotificationRoutes } from '@/modules/notifications/admin.routes';
+import {
+  adminEmailTemplateRoutes,
+  adminNotificationRoutes,
+} from '@/modules/notifications/admin.routes';
+import { adminCustomFieldRoutes } from '@/modules/custom-fields/admin.routes';
+import { adminPaymentRoutes } from '@/modules/payments/admin.routes';
+import { adminFeatureFlagRoutes } from '@/modules/feature-flags/admin.routes';
+import { adminBusinessRuleRoutes } from '@/modules/business-rules/admin.routes';
+import { adminCmsRoutes } from '@/modules/cms/admin.routes';
+import { adminPlacementsRoutes } from '@/modules/placements/admin.routes';
 
 /**
  * Composes every domain module's admin surface under a single auth gate.
@@ -38,3 +47,10 @@ adminRouter.use('/audit-log', adminAuditRoutes);
 adminRouter.use('/webhooks', adminWebhookRoutes);
 adminRouter.use('/reports', adminReportRoutes);
 adminRouter.use('/notifications', adminNotificationRoutes);
+adminRouter.use('/email-templates', adminEmailTemplateRoutes);
+adminRouter.use('/custom-fields', adminCustomFieldRoutes);
+adminRouter.use('/payment-gateways', adminPaymentRoutes);
+adminRouter.use('/feature-flags', adminFeatureFlagRoutes);
+adminRouter.use('/business-rules', adminBusinessRuleRoutes);
+adminRouter.use('/pages', adminCmsRoutes);
+adminRouter.use('/placements', adminPlacementsRoutes);

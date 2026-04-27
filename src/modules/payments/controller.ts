@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { AuthedRequest } from '@/middleware/auth';
 import { HttpError } from '@/middleware/error-handler';
 import {
-  activeGateway,
+  activeGateways,
   applyWebhookOutcome,
   checkOrderPayment,
   initPayment,
@@ -30,8 +30,21 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
   for (const [k, v] of Object.entries(req.headers)) {
     if (typeof v === 'string') headers[k.toLowerCase()] = v;
   }
-  const gw = activeGateway();
-  const outcome = await gw.parseWebhook(rawBody, headers);
+  // Walk every active gateway and let each try to parse the delivery.
+  // The first one that returns a non-IGNORED outcome wins. Lets us run
+  // multiple providers (Squad + Paystack + …) on the same webhook URL.
+  const gateways = await activeGateways();
+  let outcome: Awaited<ReturnType<(typeof gateways)[0]['parseWebhook']>> = {
+    status: 'IGNORED',
+    reason: 'No active gateway recognised this delivery',
+  };
+  for (const gw of gateways) {
+    const tryOutcome = await gw.parseWebhook(rawBody, headers);
+    if (tryOutcome.status !== 'IGNORED') {
+      outcome = tryOutcome;
+      break;
+    }
+  }
   const result = await applyWebhookOutcome(outcome);
   res.status(result.acknowledged ? 200 : 202).json(result);
 }

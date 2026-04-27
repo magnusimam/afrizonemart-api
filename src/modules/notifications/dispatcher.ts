@@ -76,32 +76,35 @@ export function startNotificationDispatcher(): void {
     const order = await loadOrderForEmail(orderId);
     if (!order || !order.user.email) return;
 
+    const props = {
+      customerName: order.user.name?.split(' ')[0] ?? 'there',
+      orderNumber: order.orderNumber,
+      orderId: order.id,
+      placedAt: fmtDateTime(order.createdAt),
+      total: order.total,
+      items: order.items.map((it) => ({
+        name: it.productName,
+        qty: it.quantity,
+        price: it.unitPrice,
+      })),
+      shippingAddress: {
+        line1: order.shipAddressLine,
+        city: order.shipCity,
+        region: order.shipCity,
+        country: order.shipCountry,
+      },
+      estimatedDelivery: estimateEta(),
+      trackUrl: `${env.WEB_URL}/account/orders/${order.id}`,
+    };
+
     await sendEmail({
       type: 'order.confirmed',
       to: order.user.email,
       subject: `Order ${order.orderNumber} confirmed`,
       userId: order.user.id,
       context: { orderId, orderNumber: order.orderNumber },
-      template: OrderConfirmedEmail({
-        customerName: order.user.name?.split(' ')[0] ?? 'there',
-        orderNumber: order.orderNumber,
-        orderId: order.id,
-        placedAt: fmtDateTime(order.createdAt),
-        total: order.total,
-        items: order.items.map((it) => ({
-          name: it.productName,
-          qty: it.quantity,
-          price: it.unitPrice,
-        })),
-        shippingAddress: {
-          line1: order.shipAddressLine,
-          city: order.shipCity,
-          region: order.shipCity,
-          country: order.shipCountry,
-        },
-        estimatedDelivery: estimateEta(),
-        trackUrl: `${env.WEB_URL}/account/orders/${order.id}`,
-      }),
+      template: OrderConfirmedEmail(props),
+      variables: props as unknown as Record<string, unknown>,
     });
   });
 
@@ -110,20 +113,23 @@ export function startNotificationDispatcher(): void {
     const order = await loadOrderForEmail(orderId);
     if (!order || !order.user.email) return;
 
+    const props = {
+      customerName: order.user.name?.split(' ')[0] ?? 'there',
+      orderNumber: order.orderNumber,
+      amount: order.total - order.refundedTotal,
+      method: PAYMENT_LABEL[method] ?? method,
+      paidAt: fmtDateTime(new Date()),
+      receiptUrl: `${env.WEB_URL}/account/orders/${order.id}`,
+    };
+
     await sendEmail({
       type: 'payment.received',
       to: order.user.email,
       subject: `Payment received for ${order.orderNumber}`,
       userId: order.user.id,
       context: { orderId, orderNumber: order.orderNumber, method },
-      template: PaymentReceivedEmail({
-        customerName: order.user.name?.split(' ')[0] ?? 'there',
-        orderNumber: order.orderNumber,
-        amount: order.total - order.refundedTotal,
-        method: PAYMENT_LABEL[method] ?? method,
-        paidAt: fmtDateTime(new Date()),
-        receiptUrl: `${env.WEB_URL}/account/orders/${order.id}`,
-      }),
+      template: PaymentReceivedEmail(props),
+      variables: props as unknown as Record<string, unknown>,
     });
   });
 
@@ -221,16 +227,18 @@ export function startNotificationDispatcher(): void {
       where: { id: userId },
       select: { name: true },
     });
+    const props = {
+      customerName: user?.name?.split(' ')[0] ?? 'there',
+      shopUrl: env.WEB_URL,
+    };
     await sendEmail({
       type: 'user.welcome',
       to: email,
       subject: 'Welcome to Afrizonemart',
       userId,
       context: { userId },
-      template: WelcomeEmail({
-        customerName: user?.name?.split(' ')[0] ?? 'there',
-        shopUrl: env.WEB_URL,
-      }),
+      template: WelcomeEmail(props),
+      variables: props as unknown as Record<string, unknown>,
     });
   });
 
@@ -242,17 +250,19 @@ export function startNotificationDispatcher(): void {
         where: { id: userId },
         select: { name: true },
       });
+      const props = {
+        customerName: user?.name?.split(' ')[0] ?? 'there',
+        resetUrl,
+        expiresInMinutes,
+      };
       await sendEmail({
         type: 'password.reset',
         to: email,
         subject: 'Reset your Afrizonemart password',
         userId,
         context: { userId, expiresInMinutes },
-        template: PasswordResetEmail({
-          customerName: user?.name?.split(' ')[0] ?? 'there',
-          resetUrl,
-          expiresInMinutes,
-        }),
+        template: PasswordResetEmail(props),
+        variables: props as unknown as Record<string, unknown>,
       });
     },
   );

@@ -1,5 +1,4 @@
 import { createHmac, randomBytes } from 'node:crypto';
-import { env } from '@/config/env';
 import { logger } from '@/infra/logger';
 import type { InitArgs, InitResult, PaymentGateway, WebhookOutcome } from './gateway';
 

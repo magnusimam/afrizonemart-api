@@ -23,6 +23,10 @@ export const listProductsQuerySchema = z.object({
     .enum(['true', 'false'])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
+  /** Phase 10.7 — filter by placement key (e.g. "homepage_hero", "cms:black-friday"). */
+  placement: z.string().optional(),
+  /** Country scope used together with placement; ignored otherwise. */
+  country: z.string().length(2).optional(),
   sort: z
     .enum(['featured', 'newest', 'price-asc', 'price-desc', 'rating'])
     .default('featured'),

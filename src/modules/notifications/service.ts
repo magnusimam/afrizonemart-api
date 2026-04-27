@@ -4,6 +4,7 @@ import { prisma } from '@/infra/prisma';
 import { logger } from '@/infra/logger';
 import { emailProvider } from './provider-factory';
 import { renderEmail } from './render';
+import { resolveDbTemplate } from './template-resolver';
 
 /**
  * One entry-point used by every event subscriber. Renders the React Email
@@ -21,10 +22,28 @@ export interface SendEmailInput {
   userId?: string | null;
   context?: Prisma.InputJsonValue;
   replyTo?: string;
+  /**
+   * Phase 10.3 — variables that get substituted into admin-edited DB
+   * templates. When omitted the dispatcher falls through to the
+   * hardcoded `template` React element.
+   */
+  variables?: Record<string, unknown>;
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<void> {
-  const { type, to, subject, template, userId, context, replyTo } = input;
+  const { type, to, userId, context, replyTo, variables } = input;
+  let { subject, template } = input;
+
+  // Try the admin-edited DB template first; fall back to the hardcoded
+  // React element if no row exists or the row is inactive.
+  if (variables) {
+    const fromDb = await resolveDbTemplate(type, variables);
+    if (fromDb) {
+      subject = fromDb.subject;
+      template = fromDb.element;
+      logger.info('email.template.source', { type, source: 'db' });
+    }
+  }
 
   let html = '';
   let text: string | undefined;

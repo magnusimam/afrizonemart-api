@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
+import { placementFilter } from '@/modules/placements/service';
 import type { ListProductsQuery } from './product.schema';
 
 /**
@@ -25,6 +26,9 @@ export async function findProducts(query: ListProductsQuery) {
       { description: { contains: query.q, mode: 'insensitive' } },
       { brand: { contains: query.q, mode: 'insensitive' } },
     ];
+  }
+  if (query.placement) {
+    Object.assign(where, placementFilter(query.placement, query.country?.toUpperCase()));
   }
 
   const orderBy: Prisma.ProductOrderByWithRelationInput = (() => {

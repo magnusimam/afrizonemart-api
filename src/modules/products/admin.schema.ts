@@ -7,6 +7,15 @@ const slug = z
   .max(120)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Use lowercase letters, numbers, and hyphens only');
 
+export const placementInputSchema = z.object({
+  placement: z.string().min(1),
+  sortOrder: z.number().int().nonnegative().default(100),
+  startsAt: z.string().datetime().nullish(),
+  endsAt: z.string().datetime().nullish(),
+  countries: z.array(z.string().length(2)).default([]),
+});
+export type PlacementInputBody = z.infer<typeof placementInputSchema>;
+
 export const upsertProductBodySchema = z.object({
   slug,
   name: z.string().trim().min(1).max(240),
@@ -23,6 +32,7 @@ export const upsertProductBodySchema = z.object({
   images: z.array(z.string()).default([]),
   attributes: z.record(z.string(), z.unknown()).default({}),
   categorySlug: z.string().min(1).nullish(),
+  placements: z.array(placementInputSchema).optional(),
 });
 export type UpsertProductBody = z.infer<typeof upsertProductBodySchema>;
 

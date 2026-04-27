@@ -1,6 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
+import { validateAndNormalizeAttributes } from '@/modules/custom-fields/service';
+import { setProductPlacements } from '@/modules/placements/service';
 import type {
   AdminListQuery,
   PartialProductBody,
@@ -65,7 +67,11 @@ export async function adminListProducts(query: AdminListQuery) {
 export async function adminGetProduct(id: string) {
   const product = await prisma.product.findUnique({
     where: { id },
-    include: { category: true, reviews: { orderBy: { createdAt: 'desc' } } },
+    include: {
+      category: true,
+      reviews: { orderBy: { createdAt: 'desc' } },
+      placements: { orderBy: [{ sortOrder: 'asc' }] },
+    },
   });
   if (!product) throw HttpError.notFound('Product not found');
   return product;
@@ -77,7 +83,9 @@ export async function adminCreateProduct(body: UpsertProductBody) {
 
   const categoryId = await resolveCategoryId(body.categorySlug);
 
-  return prisma.product.create({
+  const attributes = await validateAndNormalizeAttributes('PRODUCT', body.attributes);
+
+  const created = await prisma.product.create({
     data: {
       slug: body.slug,
       name: body.name,
@@ -93,15 +101,31 @@ export async function adminCreateProduct(body: UpsertProductBody) {
       rating: body.rating,
       reviewCount: body.reviewCount,
       images: body.images,
-      attributes: body.attributes as Prisma.InputJsonValue,
+      attributes: attributes as Prisma.InputJsonValue,
       categoryId,
     },
     include: { category: true },
   });
+  if (body.placements) {
+    await setProductPlacements(
+      created.id,
+      body.placements.map((p) => ({
+        placement: p.placement,
+        sortOrder: p.sortOrder,
+        startsAt: p.startsAt ?? null,
+        endsAt: p.endsAt ?? null,
+        countries: p.countries,
+      })),
+    );
+  }
+  return created;
 }
 
 export async function adminUpdateProduct(id: string, body: PartialProductBody) {
-  const existing = await prisma.product.findUnique({ where: { id }, select: { id: true, price: true, comparePrice: true } });
+  const existing = await prisma.product.findUnique({
+    where: { id },
+    select: { id: true, price: true, comparePrice: true, attributes: true },
+  });
   if (!existing) throw HttpError.notFound('Product not found');
 
   if (body.slug) {
@@ -122,7 +146,7 @@ export async function adminUpdateProduct(id: string, body: PartialProductBody) {
   const newCompare = body.comparePrice === undefined ? existing.comparePrice : body.comparePrice;
   const computedDiscount = discountPercent(newPrice, newCompare);
 
-  return prisma.product.update({
+  const updated = await prisma.product.update({
     where: { id },
     data: {
       ...(body.slug !== undefined && { slug: body.slug }),
@@ -140,12 +164,29 @@ export async function adminUpdateProduct(id: string, body: PartialProductBody) {
       ...(body.reviewCount !== undefined && { reviewCount: body.reviewCount }),
       ...(body.images !== undefined && { images: body.images }),
       ...(body.attributes !== undefined && {
-        attributes: body.attributes as Prisma.InputJsonValue,
+        attributes: (await validateAndNormalizeAttributes(
+          'PRODUCT',
+          body.attributes,
+          existing.attributes as Record<string, unknown>,
+        )) as Prisma.InputJsonValue,
       }),
       ...(categoryId !== undefined && { categoryId }),
     },
     include: { category: true },
   });
+  if (body.placements !== undefined) {
+    await setProductPlacements(
+      id,
+      body.placements.map((p) => ({
+        placement: p.placement,
+        sortOrder: p.sortOrder,
+        startsAt: p.startsAt ?? null,
+        endsAt: p.endsAt ?? null,
+        countries: p.countries,
+      })),
+    );
+  }
+  return updated;
 }
 
 export async function adminDeleteProduct(id: string): Promise<void> {
