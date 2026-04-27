@@ -1,12 +1,52 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 
 const prisma = new PrismaClient();
+
+interface ProductBundle {
+  units: number;
+  label: string;
+  price: number;
+  comparePrice: number;
+  savings?: number;
+  popular?: boolean;
+}
+
+interface ProductFeature {
+  icon: 'sparkles' | 'leaf' | 'globe' | 'shield' | 'heart' | 'check' | 'gem';
+  text: string;
+}
+
+interface ProductSpec {
+  label: string;
+  value: string;
+}
+
+interface ProductAttributes {
+  bundles: ProductBundle[];
+  features: ProductFeature[];
+  specifications: ProductSpec[];
+  variants?: { type: string; options: string[]; default: string };
+  aboutTitle: string;
+  aboutBody: string;
+  aboutImage: string;
+}
+
+interface SeedReview {
+  authorName: string;
+  authorCountry?: string;
+  rating: number;
+  title?: string;
+  body: string;
+  verified?: boolean;
+}
 
 interface SeedProduct {
   slug: string;
   name: string;
   brand?: string;
+  shortDescription?: string;
   description?: string;
+  ingredients?: string;
   price: number;
   comparePrice?: number;
   origin: string;
@@ -15,6 +55,8 @@ interface SeedProduct {
   reviewCount?: number;
   images?: string[];
   categorySlug: string;
+  attributes?: Partial<ProductAttributes>;
+  reviews?: SeedReview[];
 }
 
 const CATEGORIES: { slug: string; name: string }[] = [
@@ -28,6 +70,38 @@ const CATEGORIES: { slug: string; name: string }[] = [
   { slug: 'art-collectibles', name: 'Art & Collectibles' },
   { slug: 'books', name: 'Books' },
 ];
+
+/**
+ * Default rich-content attributes — applied to any product that doesn't
+ * specify its own. Bundle pricing scales off the unit price so the
+ * defaults make sense for both ₦150 drinks and ₦250k furniture.
+ */
+function defaultAttributes(p: SeedProduct): ProductAttributes {
+  const single = p.price;
+  const triple = Math.round(single * 2.7);
+  const six = Math.round(single * 5);
+  return {
+    bundles: [
+      { units: 1, label: '1 Pack', price: single, comparePrice: p.comparePrice ?? single },
+      { units: 3, label: '3 Pack', price: triple, comparePrice: single * 3, savings: 10, popular: true },
+      { units: 6, label: '6 Pack', price: six, comparePrice: single * 6, savings: 17 },
+    ],
+    features: [
+      { icon: 'globe', text: 'Sourced and made in Africa' },
+      { icon: 'check', text: 'Quality-checked by Afrizonemart' },
+      { icon: 'shield', text: '30-day no-questions-asked returns' },
+    ],
+    specifications: [
+      { label: 'Origin', value: p.origin },
+      { label: 'Brand', value: p.brand ?? 'Various' },
+    ],
+    aboutTitle: `About ${p.name}`,
+    aboutBody:
+      p.description ??
+      'A quality product brought to you from across Africa. Discover authentic items from artisans, farmers, and brands you can trust — with every purchase supporting communities across the continent.',
+    aboutImage: '/images/featured/for-her.jpg',
+  };
+}
 
 const PRODUCTS: SeedProduct[] = [
   // Groceries (24)
@@ -61,13 +135,50 @@ const PRODUCTS: SeedProduct[] = [
     slug: 'maya-himalaya-facial-scrub',
     name: 'Maya Himalaya Facial Scrub',
     brand: 'Maya Naturals',
-    description: 'Gentle exfoliating scrub with Himalayan salt and West African shea butter. 100% natural, dermatologist tested.',
+    shortDescription:
+      'Reveal radiant skin with our gentle exfoliating scrub — handcrafted with Himalayan minerals and West African shea butter.',
+    description:
+      'Maya Himalaya Facial Scrub is a luxurious exfoliator that combines the mineral-rich power of Himalayan pink salt with creamy West African shea butter and East African rosehip oil. The result is a gentle yet effective scrub that buffs away dead skin without stripping your natural moisture barrier. Suitable for all skin types — including sensitive — and 100% cruelty-free. Each batch is hand-poured in our Lagos workshop in small runs to guarantee freshness.',
+    ingredients:
+      'Sucrose, Coconut Oil, Glycerin, Himalayan Pink Salt, Shea Butter (Butyrospermum Parkii), Rosehip Oil, Vitamin E, Natural Fragrance, Plant-derived antioxidants.',
     price: 3800,
     comparePrice: 5000,
     origin: 'NG',
     rating: 4.8,
     reviewCount: 342,
     categorySlug: 'beauty',
+    attributes: {
+      bundles: [
+        { units: 1, label: '1 Pack', price: 3800, comparePrice: 5000 },
+        { units: 3, label: '3 Pack', price: 9500, comparePrice: 15000, savings: 37, popular: true },
+        { units: 6, label: '6 Pack', price: 17000, comparePrice: 30000, savings: 43 },
+      ],
+      features: [
+        { icon: 'leaf', text: '100% natural ingredients sourced across Africa' },
+        { icon: 'sparkles', text: 'Gentle exfoliation safe for daily use' },
+        { icon: 'globe', text: 'Pan-African artisanal sourcing — Nigeria, Ghana, Kenya' },
+        { icon: 'shield', text: 'Cruelty-free and dermatologist tested' },
+      ],
+      specifications: [
+        { label: 'Net Weight', value: '120g' },
+        { label: 'Dimensions', value: '5 × 5 × 8 cm' },
+        { label: 'Skin Type', value: 'All skin types incl. sensitive' },
+        { label: 'Origin', value: 'Lagos, Nigeria' },
+        { label: 'Shelf Life', value: '24 months unopened' },
+        { label: 'Vegan', value: 'Yes' },
+      ],
+      variants: { type: 'Size', options: ['50ml', '100ml', '200ml'], default: '100ml' },
+      aboutTitle: 'Reveal Your Natural Glow',
+      aboutBody:
+        "Maya Himalaya Facial Scrub is hand-crafted in Lagos using a centuries-old African beauty ritual reimagined for modern skin. Each batch combines Himalayan pink salt with shea butter from West Africa and rosehip oil from East African highlands — a true pan-African beauty experience that exfoliates without stripping. We work directly with women's cooperatives across the continent to source our ingredients, supporting over 200 families and ensuring every jar carries the story of Africa's natural beauty.",
+      aboutImage: '/images/featured/for-her.jpg',
+    },
+    reviews: [
+      { authorName: 'Adaeze O.', authorCountry: 'NG', rating: 5, title: 'Skin transformation in 2 weeks', body: 'I have sensitive skin and most scrubs leave me red and irritated. Maya is the gentlest scrub I have ever used and my skin glows after every use. Will buy the 6-pack next time!', verified: true },
+      { authorName: 'Naledi M.', authorCountry: 'ZA', rating: 5, title: 'Best skincare from Africa', body: "Shipping to Joburg was fast and the packaging is gorgeous. The shea butter smell is heavenly. I love that it's truly pan-African.", verified: true },
+      { authorName: 'Amina K.', authorCountry: 'KE', rating: 4, title: 'Love the scent, wish jar was bigger', body: 'Excellent product but the 100ml goes fast if you use it 3x a week. Switched to the 200ml which is much better value.', verified: true },
+      { authorName: 'Fatima B.', authorCountry: 'EG', rating: 5, title: 'Glowing skin in Cairo', body: 'In our dry climate exfoliation is critical and most products feel harsh. This one is balm-like, my skin feels soft for hours.', verified: true },
+    ],
   },
   { slug: 'tara-bronzer', name: 'Tara Bronzer', price: 3200, comparePrice: 4000, origin: 'EG', categorySlug: 'beauty' },
   { slug: 'fanda-lipstick', name: 'Fanda Lipstick', price: 1000, origin: 'NG', categorySlug: 'beauty' },
@@ -94,6 +205,11 @@ const PRODUCTS: SeedProduct[] = [
   { slug: 'known-and-strange-things', name: 'Known And Strange Things by Teju Cole', price: 19950, origin: 'NG', categorySlug: 'books' },
 ];
 
+function discountPercent(price: number, comparePrice?: number): number | null {
+  if (!comparePrice || comparePrice <= price) return null;
+  return Math.round(((comparePrice - price) / comparePrice) * 100);
+}
+
 async function main() {
   console.log('🌱 Seeding database...\n');
 
@@ -117,36 +233,53 @@ async function main() {
       continue;
     }
 
-    await prisma.product.upsert({
+    const baseAttrs = defaultAttributes(p);
+    const attributes: ProductAttributes = {
+      ...baseAttrs,
+      ...(p.attributes ?? {}),
+    } as ProductAttributes;
+
+    const productData = {
+      slug: p.slug,
+      name: p.name,
+      brand: p.brand ?? null,
+      shortDescription: p.shortDescription ?? null,
+      description: p.description ?? null,
+      ingredients: p.ingredients ?? null,
+      price: p.price,
+      comparePrice: p.comparePrice ?? null,
+      discountPercent: discountPercent(p.price, p.comparePrice),
+      origin: p.origin,
+      inStock: p.inStock ?? true,
+      rating: p.rating ?? 0,
+      reviewCount: p.reviewCount ?? (p.reviews?.length ?? 0),
+      images: p.images ?? [],
+      attributes: attributes as unknown as Prisma.InputJsonValue,
+      categoryId,
+    };
+
+    const upserted = await prisma.product.upsert({
       where: { slug: p.slug },
-      create: {
-        slug: p.slug,
-        name: p.name,
-        brand: p.brand ?? null,
-        description: p.description ?? null,
-        price: p.price,
-        comparePrice: p.comparePrice ?? null,
-        origin: p.origin,
-        inStock: p.inStock ?? true,
-        rating: p.rating ?? 0,
-        reviewCount: p.reviewCount ?? 0,
-        images: p.images ?? [],
-        categoryId,
-      },
-      update: {
-        name: p.name,
-        brand: p.brand ?? null,
-        description: p.description ?? null,
-        price: p.price,
-        comparePrice: p.comparePrice ?? null,
-        origin: p.origin,
-        inStock: p.inStock ?? true,
-        rating: p.rating ?? 0,
-        reviewCount: p.reviewCount ?? 0,
-        images: p.images ?? [],
-        categoryId,
-      },
+      create: productData,
+      update: productData,
     });
+
+    if (p.reviews?.length) {
+      // Replace reviews on every seed run for predictability.
+      await prisma.review.deleteMany({ where: { productId: upserted.id } });
+      await prisma.review.createMany({
+        data: p.reviews.map((r) => ({
+          productId: upserted.id,
+          authorName: r.authorName,
+          authorCountry: r.authorCountry ?? null,
+          rating: r.rating,
+          title: r.title ?? null,
+          body: r.body,
+          verified: r.verified ?? false,
+        })),
+      });
+    }
+
     console.log(`    ✓ ${p.name}`);
   }
 

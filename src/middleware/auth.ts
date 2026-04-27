@@ -12,10 +12,24 @@ import { HttpError } from './error-handler';
 export interface AuthUser {
   id: string;
   email: string;
+  role: string;
 }
 
 export interface AuthedRequest extends Request {
   user?: AuthUser;
+}
+
+interface AccessTokenClaims {
+  sub: string;
+  email: string;
+  role: string;
+  iat?: number;
+  exp?: number;
+}
+
+function userFromToken(token: string): AuthUser {
+  const claims = jwt.verify(token, env.JWT_SECRET) as AccessTokenClaims;
+  return { id: claims.sub, email: claims.email, role: claims.role };
 }
 
 export function requireAuth(
@@ -28,14 +42,8 @@ export function requireAuth(
     throw HttpError.unauthorized('Missing Authorization header');
   }
 
-  const token = header.slice(7);
-
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as AuthUser & {
-      iat?: number;
-      exp?: number;
-    };
-    req.user = { id: payload.id, email: payload.email };
+    req.user = userFromToken(header.slice(7));
     next();
   } catch {
     throw HttpError.unauthorized('Invalid or expired token');
@@ -54,8 +62,7 @@ export function optionalAuth(
   }
 
   try {
-    const payload = jwt.verify(header.slice(7), env.JWT_SECRET) as AuthUser;
-    req.user = { id: payload.id, email: payload.email };
+    req.user = userFromToken(header.slice(7));
   } catch {
     // Silently ignore invalid token in optional mode
   }

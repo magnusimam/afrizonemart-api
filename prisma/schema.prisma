@@ -11,6 +11,35 @@ datasource db {
 }
 
 // -----------------------------------------------------------------
+// Auth / Identity domain
+// -----------------------------------------------------------------
+
+enum UserRole {
+  CUSTOMER
+  SELLER
+  ADMIN
+}
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  passwordHash      String
+  name              String?
+  role              UserRole @default(CUSTOMER)
+  // Refresh tokens are hashed before storage so a DB leak doesn't grant
+  // session access. Null when the user has logged out everywhere.
+  refreshTokenHash  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  cart              Cart?
+  orders            Order[]
+  redemptions       CouponRedemption[]
+
+  @@index([email])
+}
+
+// -----------------------------------------------------------------
 // Catalog domain (Principle #7 DDD: products belong to the products
 // module on the application side; the schema mirrors the domain).
 // -----------------------------------------------------------------
@@ -26,30 +55,503 @@ model Category {
 }
 
 model Product {
-  id           String   @id @default(cuid())
-  slug         String   @unique
-  name         String
-  brand        String?
-  description  String?  @db.Text
-  // Money is stored as integers in the smallest currency unit (kobo for NGN
-  // = 1/100 of a Naira). This avoids floating-point rounding errors entirely.
-  price        Int
-  comparePrice Int?
-  origin       String?  // 2-letter ISO country code, e.g. "NG", "KE"
-  inStock      Boolean  @default(true)
-  rating       Float    @default(0)
-  reviewCount  Int      @default(0)
+  id                String   @id @default(cuid())
+  slug              String   @unique
+  name              String
+  brand             String?
+  shortDescription  String?  @db.Text
+  description       String?  @db.Text
+  ingredients       String?  @db.Text
+  // Money values in Naira (whole units). Was previously documented as kobo
+  // but the seed and frontend formatter both treat these as Naira.
+  price             Int
+  comparePrice      Int?
+  discountPercent   Int?
+  origin            String?  // 2-letter ISO country code, e.g. "NG", "KE"
+  inStock           Boolean  @default(true)
+  rating            Float    @default(0)
+  reviewCount       Int      @default(0)
   // Image URLs as a JSON array — flexible without a side table for now.
-  images       String[]
-  // Schema-Driven attributes (Principle #4) will live here later as JSON:
-  // attributes  Json @default("{}")
+  images            String[]
+  // Schema-Driven attributes (Principle #4): bundles, features, specs,
+  // variants, aboutTitle/body/image — anything that varies by product
+  // type without needing a column per attribute.
+  attributes        Json     @default("{}")
 
-  categoryId   String?
-  category     Category? @relation(fields: [categoryId], references: [id])
+  categoryId        String?
+  category          Category? @relation(fields: [categoryId], references: [id])
+  reviews           Review[]
+  cartItems         CartItem[]
+  orderItems        OrderItem[]
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([categoryId])
   @@index([origin])
+}
+
+model Review {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  authorName  String
+  authorCountry String?  // 2-letter ISO
+  rating      Int
+  title       String?
+  body        String   @db.Text
+  verified    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([productId])
+}
+
+// -----------------------------------------------------------------
+// Commerce domain — Cart + Orders
+// -----------------------------------------------------------------
+
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  // Currently-applied coupon. Carries through cart edits so a user
+  // can change quantities without losing their discount. Re-validated
+  // at place-order time.
+  couponId  String?
+  coupon    Coupon?    @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  // Cart items reference current Product rows for live pricing. Snapshot
+  // happens at order time, not cart time.
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, productId])
+  @@index([productId])
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  FULFILLING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  PAYSTACK
+  GTSQUAD
+  BANK_TRANSFER
+  CASH_ON_DELIVERY
+}
+
+enum PaymentStatus {
+  INITIATED
+  SUCCEEDED
+  FAILED
+  REVERSED
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  orderId     String
+  order       Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Which gateway processed this attempt. 'stub' is used in dev until
+  // real GT Squad keys are wired.
+  gateway     String
+  // Gateway's own reference for reconciliation + webhook lookup.
+  gatewayRef  String        @unique
+  amount      Int
+  currency    String
+  status      PaymentStatus @default(INITIATED)
+  // Redirect URL the customer is sent to (gateway-hosted page).
+  checkoutUrl String?
+  // Full request/response body — useful when debugging gateway weirdness.
+  rawPayload  Json          @default("{}")
+  settledAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([orderId])
+  @@index([gatewayRef])
+}
+
+model Order {
+  id              String        @id @default(cuid())
+  // Short, user-facing order number — generated at create time.
+  orderNumber     String        @unique
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  status          OrderStatus   @default(PENDING_PAYMENT)
+  // Money in Naira (whole units), snapshot at order time.
+  subtotal        Int
+  shippingCost    Int           @default(0)
+  total           Int
+  currency        String        @default("NGN")
+
+  // Shipping address snapshot
+  shipFullName    String
+  shipPhone       String
+  shipAddressLine String
+  shipCity        String
+  shipCountry     String        // 2-letter ISO
+
+  paymentMethod   PaymentMethod @default(PAYSTACK)
+  // External payment reference (gateway txn id) once payment succeeds.
+  paymentRef      String?
+
+  // Mirror of sum(refunds.amount) — kept in sync via service layer so
+  // we can render "₦X refunded of ₦Y" without aggregating on every read.
+  refundedTotal   Int           @default(0)
+  cancelledAt     DateTime?
+
+  // Coupon snapshot at order time (code + discount in Naira). The full
+  // coupon record is referenced via CouponRedemption for usage-cap
+  // accounting; this snapshot is for display.
+  couponCode      String?
+  couponDiscount  Int           @default(0)
+
+  // Selected shipping rate at order time (nullable for legacy orders
+  // placed before Phase 4 landed).
+  shippingRateId  String?
+  shippingRate    ShippingRate? @relation(fields: [shippingRateId], references: [id])
+
+  items           OrderItem[]
+  events          OrderEvent[]
+  refunds         Refund[]
+  redemptions     CouponRedemption[]
+  payments        Payment[]
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum OrderEventType {
+  STATUS_CHANGED
+  NOTE
+  PAYMENT_RECEIVED
+  SHIPMENT_UPDATED
+  REFUND_RECORDED
+  CANCELLED
+}
+
+model OrderEvent {
+  id                String         @id @default(cuid())
+  orderId           String
+  order             Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type              OrderEventType
+  // Free-form structured payload — e.g. { from: 'PAID', to: 'SHIPPED' }
+  // for STATUS_CHANGED, { text: '...' } for NOTE, { amount, reason }
+  // for REFUND_RECORDED. Kept JSON so adding event types stays cheap.
+  payload           Json           @default("{}")
+  // The admin user who triggered the event. Null for system-emitted
+  // events (e.g. webhook-driven status changes).
+  actorUserId       String?
+  // Whether this event should be visible to the customer in their
+  // order timeline. Private staff notes default false.
+  isCustomerVisible Boolean        @default(false)
+  createdAt         DateTime       @default(now())
+
+  @@index([orderId])
+}
+
+enum RefundStatus {
+  RECORDED  // Admin marked refund; gateway call not yet made
+  SETTLED   // Gateway confirmed money returned
+  FAILED    // Gateway rejected or reversed
+}
+
+model Refund {
+  id              String       @id @default(cuid())
+  orderId         String
+  order           Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Amount in the order's currency (Naira whole units for NGN orders).
+  amount          Int
+  reason          String?
+  status          RefundStatus @default(RECORDED)
+  // Gateway refund reference once SETTLED.
+  gatewayRef      String?
+  createdByUserId String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([orderId])
+}
+
+// -----------------------------------------------------------------
+// Discounts (Phase 4)
+// -----------------------------------------------------------------
+
+enum CouponType {
+  PERCENT_CART     // valuePercent off the cart subtotal
+  FIXED_CART       // valueAmount off the cart subtotal
+  FREE_SHIPPING    // forces shippingCost to 0
+}
+
+model Coupon {
+  id                  String       @id @default(cuid())
+  // Stored uppercase. Apply is case-insensitive (uppercased before lookup).
+  code                String       @unique
+  description         String?
+  type                CouponType
+  // Exactly one of these is meaningful per type — service enforces it.
+  valuePercent        Int?         // 1-100 for PERCENT_CART
+  valueAmount         Int?         // Naira whole units for FIXED_CART
+  minSubtotal         Int?         // require cart subtotal ≥ this
+  maxUses             Int?         // total uses across all customers
+  maxUsesPerCustomer  Int?         // per-customer cap
+  startsAt            DateTime?
+  endsAt              DateTime?
+  isActive            Boolean      @default(true)
+  // Denormalized count for cheap list-view rendering. Source of truth
+  // is `redemptions.count` — we keep this in sync via the service.
+  usageCount          Int          @default(0)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  redemptions         CouponRedemption[]
+  carts               Cart[]
+
+  @@index([code])
+  @@index([isActive])
+}
+
+model CouponRedemption {
+  id                String   @id @default(cuid())
+  couponId          String
+  coupon            Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User     @relation(fields: [userId], references: [id])
+  orderId           String
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountDiscounted  Int
+  createdAt         DateTime @default(now())
+
+  @@index([couponId])
+  @@index([userId, couponId])
+  @@index([orderId])
+}
+
+// -----------------------------------------------------------------
+// Shipping (Phase 4) — replaces hardcoded ₦1500 / free-over-₦10k.
+// -----------------------------------------------------------------
+
+model ShippingZone {
+  id          String          @id @default(cuid())
+  name        String
+  // ISO-2 country codes covered by this zone, e.g. ["NG"], ["KE","TZ","UG"].
+  // Empty array = wildcard (matches any country); used together with
+  // isDefault for the catch-all "Rest of world" zone.
+  countries   String[]
+  isDefault   Boolean         @default(false)
+  sortOrder   Int             @default(0)
+  rates       ShippingRate[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([isDefault])
+}
+
+model ShippingRate {
+  id                String       @id @default(cuid())
+  zoneId            String
+  zone              ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  name              String
+  // Naira whole units (matches order/product money convention).
+  priceAmount       Int          @default(0)
+  // Free above this subtotal threshold. Null = never auto-free.
+  freeAboveAmount   Int?
+  isDefault         Boolean      @default(false)
+  sortOrder         Int          @default(0)
+  orders            Order[]
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([zoneId])
+}
+
+// User backref for CouponRedemption (added separately to keep User
+// model declaration tidy when scrolling).
+//
+// (Prisma requires the relation field on both sides; we add it on User
+// at top-level via the `redemptions` field below.)
+
+model OrderItem {
+  id              String   @id @default(cuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
+  // Snapshot the product fields so historical orders are stable even if
+  // the catalog changes (price, name, image).
+  productSlug     String
+  productName     String
+  productImage    String?
+  unitPrice       Int
+  quantity        Int
+  lineTotal       Int
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// -----------------------------------------------------------------
+// Settings (Phase 5) — store-wide key/value config edited from admin.
+// `value` is JSON so a setting can be a string, number, boolean,
+// object or array; the typed registry on the application side keeps
+// the shape honest.
+// -----------------------------------------------------------------
+
+model Setting {
+  key             String   @id
+  value           Json
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// -----------------------------------------------------------------
+// Audit log (Phase 5) — who-did-what across admin actions.
+// -----------------------------------------------------------------
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  // Snapshot the actor's email at log time so the row stays readable
+  // after the user is deleted/renamed.
+  actorUserId String?
+  actorEmail  String?
+  // Free-form so we can audit anything: 'product', 'order', 'staff',
+  // 'setting', 'webhook', etc.
+  entityType  String
+  entityId    String?
+  // 'create' / 'update' / 'delete' / domain-specific ('refund.recorded',
+  // 'order.status_changed', 'staff.created'...).
+  action      String
+  // Structured diff or context payload — { before, after, ... }.
+  changes     Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@index([createdAt])
+}
+
+// -----------------------------------------------------------------
+// Webhooks (Phase 5) — outbound HTTP callbacks for in-process events.
+// -----------------------------------------------------------------
+
+model Webhook {
+  id          String             @id @default(cuid())
+  name        String
+  url         String
+  // Subscribed event names (e.g. 'order.placed', 'order.refunded').
+  // Wildcard '*' subscribes to every event.
+  events      String[]
+  // HMAC-SHA256 secret used to sign delivery payloads. Generated at
+  // create time, returned once, hashed/stored at rest? For v1 we
+  // store the raw secret since it's per-webhook and only admins
+  // can read it; tighten later if needed.
+  secret      String
+  isActive    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  deliveries  WebhookDelivery[]
+
+  @@index([isActive])
+}
+
+model WebhookDelivery {
+  id            String    @id @default(cuid())
+  webhookId     String
+  webhook       Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  eventType     String
+  payload       Json
+  // null until first attempt completes. statusCode 0 = transport error.
+  statusCode    Int?
+  responseBody  String?   @db.Text
+  attempts      Int       @default(0)
+  succeededAt   DateTime?
+  failedAt      DateTime?
+  // Set when a failed delivery is queued for retry. Worker picks up
+  // rows where succeededAt IS NULL AND nextAttemptAt <= NOW().
+  nextAttemptAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([webhookId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@index([nextAttemptAt])
+}
+
+// -----------------------------------------------------------------
+// Notifications (Phase 8) — log of every transactional message
+// (email/SMS/push) we send, plus password reset tokens.
+// -----------------------------------------------------------------
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  PUSH
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Notification {
+  id                String              @id @default(cuid())
+  userId            String?
+  channel           NotificationChannel @default(EMAIL)
+  // e.g. 'order.confirmed', 'order.shipped', 'password.reset', 'welcome'
+  type              String
+  recipient         String
+  subject           String?
+  // Adapter's outbound message id (Resend's id, Twilio's SID, etc.).
+  providerMessageId String?
+  status            NotificationStatus  @default(PENDING)
+  error             String?             @db.Text
+  // Free-form context — useful for "Resend" replays without re-fetching
+  // every related entity from the DB.
+  context           Json                @default("{}")
+  sentAt            DateTime?
+  createdAt         DateTime            @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  userId     String
+  // Bcrypt-hashed token. The plaintext is only sent in the email; we
+  // never store it. Confirm endpoint compares incoming plaintext
+  // against this hash.
+  tokenHash  String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }

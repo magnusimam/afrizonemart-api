@@ -19,6 +19,10 @@ export const listProductsQuerySchema = z.object({
     .enum(['true', 'false'])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
+  onSale: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
   sort: z
     .enum(['featured', 'newest', 'price-asc', 'price-desc', 'rating'])
     .default('featured'),

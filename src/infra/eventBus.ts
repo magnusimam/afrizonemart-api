@@ -27,8 +27,19 @@ export interface EventMap {
   };
   'order.shipped': {
     orderId: string;
-    carrier: string;
-    trackingNumber: string;
+    userId: string;
+    carrier?: string;
+    trackingNumber?: string;
+  };
+  'order.delivered': {
+    orderId: string;
+    userId: string;
+  };
+  'password.reset_requested': {
+    userId: string;
+    email: string;
+    resetUrl: string;
+    expiresInMinutes: number;
   };
   'product.viewed': {
     productId: string;
@@ -37,6 +48,30 @@ export interface EventMap {
   'cart.updated': {
     userId: string;
     itemCount: number;
+  };
+  'user.registered': {
+    userId: string;
+    email: string;
+  };
+  'user.logged_in': {
+    userId: string;
+    email: string;
+  };
+  'order.cancelled': {
+    orderId: string;
+    userId: string;
+    reason?: string;
+  };
+  'order.refunded': {
+    orderId: string;
+    userId: string;
+    amount: number;
+    reason?: string;
+  };
+  'order.note_added': {
+    orderId: string;
+    userId: string;
+    isCustomerVisible: boolean;
   };
 }
 

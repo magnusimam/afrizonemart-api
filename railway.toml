@@ -3,10 +3,14 @@
 
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install && npm run prisma:generate && npm run build"
+# Nixpacks runs `npm ci` automatically; we only need to add the
+# Prisma generate + TypeScript compile steps on top.
+buildCommand = "npm run prisma:generate && npm run build"
 
 [deploy]
-startCommand = "npm run prisma:migrate deploy && node dist/server.js"
+# `prisma migrate deploy` (NOT `migrate dev`) is the production-safe
+# command — applies pending migrations, never prompts, never generates.
+startCommand = "npx prisma migrate deploy && node dist/server.js"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"

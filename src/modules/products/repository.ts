@@ -17,6 +17,8 @@ export async function findProducts(query: ListProductsQuery) {
   if (query.category) where.category = { slug: query.category };
   if (query.origin) where.origin = query.origin.toUpperCase();
   if (query.inStock !== undefined) where.inStock = query.inStock;
+  if (query.onSale === true) where.comparePrice = { not: null };
+  if (query.onSale === false) where.comparePrice = null;
   if (query.q) {
     where.OR = [
       { name: { contains: query.q, mode: 'insensitive' } },
@@ -58,6 +60,9 @@ export async function findProducts(query: ListProductsQuery) {
 export async function findProductBySlug(slug: string) {
   return prisma.product.findUnique({
     where: { slug },
-    include: { category: true },
+    include: {
+      category: true,
+      reviews: { orderBy: { createdAt: 'desc' } },
+    },
   });
 }

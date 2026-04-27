@@ -8,3 +8,4 @@ dist/
 .idea/
 .vscode/
 prisma/migrations/dev.db*
+uploads/
