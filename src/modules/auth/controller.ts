@@ -2,6 +2,7 @@ import type { CookieOptions, Request, Response } from 'express';
 import { isProduction } from '@/config/env';
 import { HttpError } from '@/middleware/error-handler';
 import type { AuthedRequest } from '@/middleware/auth';
+import { z } from 'zod';
 import {
   forgotPasswordBodySchema,
   loginBodySchema,
@@ -17,6 +18,11 @@ import {
   requestPasswordReset,
   resetPassword,
 } from './service';
+import { signInWithGoogle } from './google.service';
+import {
+  startPhoneVerification,
+  verifyPhoneAndSignIn,
+} from './phone.service';
 
 const REFRESH_COOKIE = 'azm_refresh';
 
@@ -119,5 +125,37 @@ export async function resetPasswordHandler(
   const body = resetPasswordBodySchema.parse(req.body);
   await resetPassword(body);
   res.status(204).end();
+}
+
+const googleBody = z.object({ idToken: z.string().min(1) });
+
+export async function googleSignInHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const { idToken } = googleBody.parse(req.body);
+  const result = await signInWithGoogle(idToken);
+  setRefreshCookie(res, result.refreshToken);
+  res.json(buildResponse(result));
+}
+
+const phoneStartBody = z.object({ phone: z.string().min(8).max(20) });
+
+export async function phoneStartHandler(req: Request, res: Response): Promise<void> {
+  const { phone } = phoneStartBody.parse(req.body);
+  const r = await startPhoneVerification(phone);
+  res.json(r);
+}
+
+const phoneVerifyBody = z.object({
+  phone: z.string().min(8).max(20),
+  code: z.string().min(4).max(8),
+});
+
+export async function phoneVerifyHandler(req: Request, res: Response): Promise<void> {
+  const body = phoneVerifyBody.parse(req.body);
+  const result = await verifyPhoneAndSignIn(body.phone, body.code);
+  setRefreshCookie(res, result.refreshToken);
+  res.json(buildResponse(result));
 }
 

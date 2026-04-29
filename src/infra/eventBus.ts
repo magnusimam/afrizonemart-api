@@ -41,6 +41,12 @@ export interface EventMap {
     resetUrl: string;
     expiresInMinutes: number;
   };
+  'cart.abandoned': {
+    userId: string;
+    cartId: string;
+    itemCount: number;
+    total: number;
+  };
   'product.viewed': {
     productId: string;
     userId?: string;

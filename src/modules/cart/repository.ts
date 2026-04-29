@@ -44,6 +44,20 @@ export function createCartItems(
   });
 }
 
+/**
+ * Bumps the cart's `updatedAt` and clears any pending abandoned-cart
+ * notification timestamp. Call this after every CartItem mutation so:
+ *   1. The 24h abandonment sweeper sees a fresh timestamp
+ *   2. A user who comes back and changes their cart can be re-notified
+ *      if they later abandon again.
+ */
+export function touchCart(cartId: string) {
+  return prisma.cart.update({
+    where: { id: cartId },
+    data: { abandonedNotifiedAt: null, updatedAt: new Date() },
+  });
+}
+
 export function setCartCoupon(userId: string, couponId: string | null) {
   return prisma.cart.update({ where: { userId }, data: { couponId } });
 }

@@ -8,6 +8,7 @@ import {
   ensureCart,
   findCartByUserId,
   setCartCoupon,
+  touchCart,
 } from './repository';
 import type { ReplaceCartBody } from './cart.schema';
 
@@ -103,6 +104,7 @@ export async function replaceCart(
   const cartId = await ensureCart(userId);
   await clearCartItems(cartId);
   await createCartItems(cartId, body.items);
+  await touchCart(cartId);
 
   await eventBus.emit('cart.updated', {
     userId,
@@ -117,6 +119,7 @@ export async function clearCart(userId: string): Promise<CartView> {
   if (cart) {
     await clearCartItems(cart.id);
     await setCartCoupon(userId, null);
+    await touchCart(cart.id);
     await eventBus.emit('cart.updated', { userId, itemCount: 0 });
   }
   return {

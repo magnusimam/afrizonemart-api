@@ -23,6 +23,7 @@ import { featureFlagRoutes } from '@/modules/feature-flags/routes';
 import { cmsRoutes } from '@/modules/cms/routes';
 import { startWebhookDispatcher } from '@/modules/webhooks/dispatcher';
 import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
+import { startAbandonedCartCron } from '@/modules/cart/abandoned-cron';
 
 /**
  * API entry point.
@@ -40,6 +41,11 @@ initSentry();
 
 const app = express();
 
+// Railway / Cloudflare puts a proxy in front of us — trust the first
+// hop so express-rate-limit (and other IP-aware middleware) sees the
+// real client IP from `X-Forwarded-For`.
+app.set('trust proxy', 1);
+
 if (env.SENTRY_DSN) {
   Sentry.setupExpressErrorHandler(app);
 }
@@ -48,9 +54,23 @@ if (env.SENTRY_DSN) {
 // frontend (different port in dev) from loading uploaded images. Loosen
 // it to cross-origin so /uploads/* assets render on the storefront.
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+
+// CORS: allow our explicit list (CORS_ORIGINS env) plus any Vercel
+// per-deploy URL under our project. Vercel mints a unique URL for every
+// `vercel --prod` build (like `afrizonemart-xyz123-imammagnus40-…vercel.app`),
+// and we want those to work without re-deploying the API every time.
+const VERCEL_PROJECT_PREVIEW =
+  /^https:\/\/afrizonemart-[a-z0-9]+-imammagnus40-8846s-projects\.vercel\.app$/i;
+
 app.use(
   cors({
-    origin: corsOrigins,
+    origin: (origin, cb) => {
+      // Same-origin / curl / server-to-server have no Origin header.
+      if (!origin) return cb(null, true);
+      if (corsOrigins.includes(origin)) return cb(null, true);
+      if (VERCEL_PROJECT_PREVIEW.test(origin)) return cb(null, true);
+      return cb(new Error(`CORS: origin "${origin}" not allowed`), false);
+    },
     credentials: true,
   }),
 );
@@ -102,6 +122,7 @@ async function start() {
   await connectDatabase();
   startWebhookDispatcher();
   startNotificationDispatcher();
+  startAbandonedCartCron();
   app.listen(env.PORT, () => {
     logger.info('server.listening', {
       port: env.PORT,

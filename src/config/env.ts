@@ -64,6 +64,18 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default('Afrizonemart <no-reply@afrizonemart.com>'),
   EMAIL_REPLY_TO: z.string().optional(),
+
+  // Google OAuth — when set, the storefront's "Continue with Google"
+  // button is enabled. The same client id is exposed on the frontend
+  // via NEXT_PUBLIC_GOOGLE_CLIENT_ID.
+  GOOGLE_CLIENT_ID: z.string().optional(),
+
+  // Twilio Verify — phone/SMS auth. When all three are set, the
+  // /api/auth/phone/* endpoints are functional. Without them they
+  // return a clear "phone auth not configured" error.
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_VERIFY_SID: z.string().optional(),
 });
 
 // Bulk-upload CSVs can be larger than the default 1mb express body limit.

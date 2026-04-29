@@ -25,6 +25,14 @@ model User {
   email             String   @unique
   passwordHash      String
   name              String?
+  /// Optional E.164 phone (e.g. "+2348012345678"). Set by SMS auth flow.
+  phone             String?  @unique
+  /// Google subject id when the account was first linked via Google OAuth.
+  /// We store it so we can identify the same Google user across email
+  /// changes. Null for password-only or phone-only users.
+  googleId          String?  @unique
+  /// Picture URL from the OAuth provider — handy for avatars.
+  avatarUrl         String?
   role              UserRole @default(CUSTOMER)
   // Refresh tokens are hashed before storage so a DB leak doesn't grant
   // session access. Null when the user has logged out everywhere.
@@ -37,6 +45,7 @@ model User {
   redemptions       CouponRedemption[]
 
   @@index([email])
+  @@index([phone])
 }
 
 // -----------------------------------------------------------------
@@ -122,8 +131,13 @@ model Cart {
   // at place-order time.
   couponId  String?
   coupon    Coupon?    @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  // Phase Audit.9 — set the moment we send a recovery email so we don't
+  // re-spam the user. Cleared whenever the cart is modified.
+  abandonedNotifiedAt DateTime?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
+
+  @@index([updatedAt, abandonedNotifiedAt])
 }
 
 model CartItem {

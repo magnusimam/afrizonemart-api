@@ -3,6 +3,7 @@ import { eventBus } from '@/infra/eventBus';
 import { logger } from '@/infra/logger';
 import { prisma } from '@/infra/prisma';
 import { sendEmail } from './service';
+import { AbandonedCartEmail } from './templates/AbandonedCart';
 import { OrderConfirmedEmail } from './templates/OrderConfirmed';
 import { PaymentReceivedEmail } from './templates/PaymentReceived';
 import { OrderShippedEmail } from './templates/OrderShipped';
@@ -242,6 +243,30 @@ export function startNotificationDispatcher(): void {
     });
   });
 
+  // ---------- cart.abandoned → AbandonedCartEmail ----------
+  eventBus.on('cart.abandoned', async ({ userId, itemCount, total }) => {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, name: true },
+    });
+    if (!user?.email) return;
+    const props = {
+      customerName: user.name?.split(' ')[0] ?? 'there',
+      itemCount,
+      total,
+      cartUrl: `${env.WEB_URL}/cart`,
+    };
+    await sendEmail({
+      type: 'cart.abandoned',
+      to: user.email,
+      subject: `You left ${itemCount} item${itemCount === 1 ? '' : 's'} in your cart`,
+      userId,
+      context: { itemCount, total },
+      template: AbandonedCartEmail(props),
+      variables: props as unknown as Record<string, unknown>,
+    });
+  });
+
   // ---------- password.reset_requested → PasswordReset ----------
   eventBus.on(
     'password.reset_requested',
@@ -277,6 +302,7 @@ export function startNotificationDispatcher(): void {
       'order.refunded',
       'user.registered',
       'password.reset_requested',
+      'cart.abandoned',
     ],
   });
 }
