@@ -26,6 +26,7 @@ import { categoryRoutes } from '@/modules/categories/routes';
 import { startWebhookDispatcher } from '@/modules/webhooks/dispatcher';
 import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
 import { startAbandonedCartCron } from '@/modules/cart/abandoned-cron';
+import { ensureCoreCategories } from '@/infra/ensure-categories';
 
 /**
  * API entry point.
@@ -130,6 +131,7 @@ app.use(errorHandler);
 
 async function start() {
   await connectDatabase();
+  await ensureCoreCategories();
   startWebhookDispatcher();
   startNotificationDispatcher();
   startAbandonedCartCron();
