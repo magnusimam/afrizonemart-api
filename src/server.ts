@@ -21,6 +21,8 @@ import { paymentRoutes } from '@/modules/payments/routes';
 import { customFieldRoutes } from '@/modules/custom-fields/routes';
 import { featureFlagRoutes } from '@/modules/feature-flags/routes';
 import { cmsRoutes } from '@/modules/cms/routes';
+import { fxRoutes } from '@/modules/fx/routes';
+import { categoryRoutes } from '@/modules/categories/routes';
 import { startWebhookDispatcher } from '@/modules/webhooks/dispatcher';
 import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
 import { startAbandonedCartCron } from '@/modules/cart/abandoned-cron';
@@ -62,6 +64,11 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 const VERCEL_PROJECT_PREVIEW =
   /^https:\/\/afrizonemart-[a-z0-9]+-imammagnus40-8846s-projects\.vercel\.app$/i;
 
+// In development we allow any localhost port — Next.js falls back to
+// 3001/3002/etc. when 3000 is taken and we shouldn't break the inner
+// loop over an env list.
+const LOCALHOST_ANY_PORT = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+
 app.use(
   cors({
     origin: (origin, cb) => {
@@ -69,6 +76,7 @@ app.use(
       if (!origin) return cb(null, true);
       if (corsOrigins.includes(origin)) return cb(null, true);
       if (VERCEL_PROJECT_PREVIEW.test(origin)) return cb(null, true);
+      if (isDevelopment && LOCALHOST_ANY_PORT.test(origin)) return cb(null, true);
       return cb(new Error(`CORS: origin "${origin}" not allowed`), false);
     },
     credentials: true,
@@ -112,6 +120,8 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/custom-fields', customFieldRoutes);
 app.use('/api/flags', featureFlagRoutes);
 app.use('/api/pages', cmsRoutes);
+app.use('/api/fx', fxRoutes);
+app.use('/api/categories', categoryRoutes);
 app.use('/api/admin', adminRouter);
 
 // Terminal handlers
