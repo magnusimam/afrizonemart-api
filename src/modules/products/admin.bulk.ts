@@ -37,6 +37,27 @@ interface CsvRow {
 const TRUE_VALUES = new Set(['true', '1', 'yes', 'y']);
 const FALSE_VALUES = new Set(['false', '0', 'no', 'n']);
 
+/** Convert "Hello World!" → "hello-world". Used when the CSV omits
+ *  the slug column so admins don't have to compute slugs by hand. */
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+/** "interior-decor" → "Interior Decor". Used when we auto-create a
+ *  category whose name we don't have on hand. Admin can rename later
+ *  from /admin/categories. */
+function humanizeSlug(slug: string): string {
+  return slug
+    .split(/[-_]/)
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : ''))
+    .join(' ');
+}
+
 function parseBool(s: string | undefined, fallback: boolean): boolean {
   if (s === undefined) return fallback;
   const v = s.trim().toLowerCase();
@@ -89,7 +110,9 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
     throw HttpError.badRequest(`CSV parse error on row ${first.row}: ${first.message}`);
   }
 
-  // Pre-load category slugs once.
+  // Pre-load category slugs once. Mutable map so on-the-fly category
+  // creation (below) is reused for the rest of the import in the same
+  // run instead of re-creating the same slug per-row.
   const categories = await prisma.category.findMany({ select: { id: true, slug: true } });
   const categoryIdBySlug = new Map(categories.map((c) => [c.slug, c.id]));
 
@@ -105,12 +128,14 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
     const rowNum = i + 2;
 
     try {
-      const slug = row.slug?.trim();
       const name = row.name?.trim();
       const priceStr = row.price?.trim();
-      if (!slug || !name || !priceStr) {
-        throw new Error('slug, name, and price are required');
+      if (!name || !priceStr) {
+        throw new Error('name and price are required');
       }
+      // Slug is auto-generated from name when omitted — admins can
+      // bulk-upload a list of products without hand-writing slugs.
+      const slug = row.slug?.trim() || slugify(name);
       const price = Number(priceStr);
       if (!Number.isFinite(price) || price < 0) throw new Error(`Invalid price "${priceStr}"`);
 
@@ -120,10 +145,24 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
         throw new Error(`Invalid comparePrice "${compareStr}"`);
       }
 
+      // Category resolution: pull from cache; auto-create if the slug
+      // is unknown (CTO-OK'd for the WordPress import flow). Reused
+      // the same row when multiple products share a new category.
       const categorySlug = row.categorySlug?.trim() || null;
-      const categoryId = categorySlug ? categoryIdBySlug.get(categorySlug) ?? null : null;
-      if (categorySlug && !categoryId) {
-        throw new Error(`Unknown categorySlug "${categorySlug}"`);
+      let categoryId: string | null = null;
+      if (categorySlug) {
+        categoryId = categoryIdBySlug.get(categorySlug) ?? null;
+        if (!categoryId) {
+          const fresh = await prisma.category.create({
+            data: {
+              slug: categorySlug,
+              name: humanizeSlug(categorySlug),
+            },
+            select: { id: true },
+          });
+          categoryId = fresh.id;
+          categoryIdBySlug.set(categorySlug, fresh.id);
+        }
       }
 
       const origin = row.origin?.trim().toUpperCase() || null;
@@ -212,6 +251,12 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
 
 export const BULK_TEMPLATE_CSV = [
   'slug,name,brand,price,comparePrice,categorySlug,origin,inStock,shortDescription,description,ingredients,images',
+  // Full row — every column populated:
   'example-product,Example Product,Example Brand,1500,2000,groceries,NG,true,A short tagline,A longer description goes here,Sucrose|Coconut Oil,https://example.com/img1.jpg|https://example.com/img2.jpg',
+  // Slug omitted — auto-generated from name as "another-example-product":
+  ',Another Example Product,,800,,beauty,KE,true,A nice short blurb,,,',
+  // Unknown category — auto-created on import:
+  ',Brand New Category Item,,1200,,furniture,NG,true,,,,',
+  // Out of stock + minimal:
   'example-out-of-stock,Out of Stock Example,,500,,beauty,GH,false,Currently unavailable,,,',
 ].join('\n');
