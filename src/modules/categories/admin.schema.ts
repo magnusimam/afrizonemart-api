@@ -9,6 +9,7 @@ export const upsertCategoryBodySchema = z.object({
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Use lowercase letters, numbers, and hyphens'),
   name: z.string().trim().min(1).max(120),
   image: z.string().url().nullish(),
+  parentId: z.string().trim().min(1).nullish(),
 });
 export type UpsertCategoryBody = z.infer<typeof upsertCategoryBodySchema>;
 

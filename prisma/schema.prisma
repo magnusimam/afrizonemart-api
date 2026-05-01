@@ -54,13 +54,18 @@ model User {
 // -----------------------------------------------------------------
 
 model Category {
-  id        String    @id @default(cuid())
-  slug      String    @unique
+  id        String     @id @default(cuid())
+  slug      String     @unique
   name      String
   image     String?
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Category[] @relation("CategoryTree")
   products  Product[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([parentId])
 }
 
 model Product {

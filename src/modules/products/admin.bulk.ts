@@ -17,28 +17,37 @@ export interface BulkUploadResult {
   skipped: number;
   errors: number;
   results: BulkRowResult[];
+  /** Names of CSV columns that didn't map to a known product field — they
+   *  were stashed into each product's `attributes.customAttributes`. The
+   *  admin can promote any of these to a proper CustomFieldDef later. */
+  unknownColumns: string[];
 }
 
-interface CsvRow {
-  slug?: string;
-  name?: string;
-  brand?: string;
-  shortDescription?: string;
-  description?: string;
-  ingredients?: string;
-  price?: string;
-  comparePrice?: string;
-  origin?: string;
-  inStock?: string;
-  images?: string;
-  categorySlug?: string;
-}
+type RawRow = Record<string, string | undefined>;
+
+/** Columns the importer recognises as first-class product fields. Anything
+ *  outside this set is treated as a custom attribute and stashed into
+ *  `attributes.customAttributes.<name>` so the admin can decide later
+ *  whether to promote it to a proper CustomFieldDef. */
+const KNOWN_COLUMNS = new Set([
+  'slug',
+  'name',
+  'brand',
+  'shortDescription',
+  'description',
+  'ingredients',
+  'price',
+  'comparePrice',
+  'origin',
+  'inStock',
+  'images',
+  'categorySlug',
+  'subcategorySlug',
+]);
 
 const TRUE_VALUES = new Set(['true', '1', 'yes', 'y']);
 const FALSE_VALUES = new Set(['false', '0', 'no', 'n']);
 
-/** Convert "Hello World!" → "hello-world". Used when the CSV omits
- *  the slug column so admins don't have to compute slugs by hand. */
 function slugify(s: string): string {
   return s
     .toLowerCase()
@@ -48,9 +57,6 @@ function slugify(s: string): string {
     .slice(0, 80);
 }
 
-/** "interior-decor" → "Interior Decor". Used when we auto-create a
- *  category whose name we don't have on hand. Admin can rename later
- *  from /admin/categories. */
 function humanizeSlug(slug: string): string {
   return slug
     .split(/[-_]/)
@@ -98,8 +104,22 @@ function defaultAttributes(p: { price: number; comparePrice: number | null; name
   };
 }
 
+/** Pulls every column not in KNOWN_COLUMNS off a CSV row. Empty values
+ *  are skipped (treated as "no opinion") so importing a sparse spreadsheet
+ *  doesn't wipe attributes that already exist on the product. */
+function extractCustomAttributes(row: RawRow): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (!key || KNOWN_COLUMNS.has(key)) continue;
+    const trimmed = value?.trim();
+    if (!trimmed) continue;
+    out[key] = trimmed;
+  }
+  return out;
+}
+
 export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult> {
-  const parsed = Papa.parse<CsvRow>(csv, {
+  const parsed = Papa.parse<RawRow>(csv, {
     header: true,
     skipEmptyLines: 'greedy',
     transformHeader: (h) => h.trim(),
@@ -110,16 +130,24 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
     throw HttpError.badRequest(`CSV parse error on row ${first.row}: ${first.message}`);
   }
 
-  // Pre-load category slugs once. Mutable map so on-the-fly category
-  // creation (below) is reused for the rest of the import in the same
-  // run instead of re-creating the same slug per-row.
-  const categories = await prisma.category.findMany({ select: { id: true, slug: true } });
-  const categoryIdBySlug = new Map(categories.map((c) => [c.slug, c.id]));
+  // Names of columns the importer didn't recognise — surfaced in the
+  // result so the admin sees which fields ended up under
+  // `attributes.customAttributes`.
+  const headerFields = parsed.meta.fields ?? [];
+  const unknownColumns = headerFields.filter((h) => h && !KNOWN_COLUMNS.has(h));
+
+  // Pre-load category slugs once. Mutable map so on-the-fly category /
+  // subcategory creation (below) is reused for the rest of the import in
+  // the same run instead of re-creating the same slug per-row.
+  const categories = await prisma.category.findMany({
+    select: { id: true, slug: true, parentId: true },
+  });
+  const categoryBySlug = new Map(categories.map((c) => [c.slug, c]));
 
   const results: BulkRowResult[] = [];
   let created = 0;
   let updated = 0;
-  let skipped = 0;
+  const skipped = 0;
   let errors = 0;
 
   for (let i = 0; i < parsed.data.length; i++) {
@@ -133,8 +161,6 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
       if (!name || !priceStr) {
         throw new Error('name and price are required');
       }
-      // Slug is auto-generated from name when omitted — admins can
-      // bulk-upload a list of products without hand-writing slugs.
       const slug = row.slug?.trim() || slugify(name);
       const price = Number(priceStr);
       if (!Number.isFinite(price) || price < 0) throw new Error(`Invalid price "${priceStr}"`);
@@ -146,22 +172,61 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
       }
 
       // Category resolution: pull from cache; auto-create if the slug
-      // is unknown (CTO-OK'd for the WordPress import flow). Reused
-      // the same row when multiple products share a new category.
+      // is unknown. A subcategorySlug, when present, becomes the leaf
+      // (the product's categoryId points at the deepest known node).
       const categorySlug = row.categorySlug?.trim() || null;
-      let categoryId: string | null = null;
+      const subcategorySlug = row.subcategorySlug?.trim() || null;
+
+      if (subcategorySlug && !categorySlug) {
+        throw new Error('subcategorySlug requires a categorySlug (subcategories must have a parent)');
+      }
+
+      let parentCategoryId: string | null = null;
       if (categorySlug) {
-        categoryId = categoryIdBySlug.get(categorySlug) ?? null;
-        if (!categoryId) {
+        const existingParent = categoryBySlug.get(categorySlug);
+        if (existingParent) {
+          parentCategoryId = existingParent.id;
+        } else {
           const fresh = await prisma.category.create({
             data: {
               slug: categorySlug,
               name: humanizeSlug(categorySlug),
             },
-            select: { id: true },
+            select: { id: true, slug: true, parentId: true },
           });
-          categoryId = fresh.id;
-          categoryIdBySlug.set(categorySlug, fresh.id);
+          parentCategoryId = fresh.id;
+          categoryBySlug.set(categorySlug, fresh);
+        }
+      }
+
+      // Final categoryId on the product — leaf wins (subcategory if
+      // present, else top-level category). Mirrors how Shopify and
+      // WooCommerce treat the deepest assigned term as the canonical
+      // category for filtering/breadcrumbs.
+      let leafCategoryId: string | null = parentCategoryId;
+      if (subcategorySlug) {
+        const existingSub = categoryBySlug.get(subcategorySlug);
+        if (existingSub) {
+          // Reject ambiguous reuse — same slug under a different parent
+          // would silently mis-assign products in WordPress imports.
+          if (existingSub.parentId !== parentCategoryId) {
+            throw new Error(
+              `subcategory "${subcategorySlug}" already exists under a different parent — ` +
+                `pick a unique slug (e.g. "${categorySlug}-${subcategorySlug}")`,
+            );
+          }
+          leafCategoryId = existingSub.id;
+        } else {
+          const fresh = await prisma.category.create({
+            data: {
+              slug: subcategorySlug,
+              name: humanizeSlug(subcategorySlug),
+              parentId: parentCategoryId,
+            },
+            select: { id: true, slug: true, parentId: true },
+          });
+          leafCategoryId = fresh.id;
+          categoryBySlug.set(subcategorySlug, fresh);
         }
       }
 
@@ -183,16 +248,43 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
       const description = row.description?.trim() || null;
       const ingredients = row.ingredients?.trim() || null;
 
-      const attributes = defaultAttributes({
-        price,
-        comparePrice,
-        name,
-        description,
-        brand,
-        origin,
+      const customAttributes = extractCustomAttributes(row);
+
+      const existing = await prisma.product.findUnique({
+        where: { slug },
+        select: { id: true, attributes: true },
       });
 
-      const existing = await prisma.product.findUnique({ where: { slug }, select: { id: true } });
+      // Attributes payload differs CREATE vs UPDATE:
+      //   - CREATE: write the full default template + any customAttributes from CSV.
+      //   - UPDATE: keep the existing attributes JSON intact (so hand-edited
+      //     bundles/features/specs/about survive a CSV refresh) and merge
+      //     in only the customAttributes from this row, overlaying keys.
+      let attributesPayload: Prisma.InputJsonValue | undefined;
+      if (existing) {
+        if (Object.keys(customAttributes).length > 0) {
+          const existingAttrs =
+            existing.attributes && typeof existing.attributes === 'object' && !Array.isArray(existing.attributes)
+              ? (existing.attributes as Record<string, unknown>)
+              : {};
+          const existingCustom =
+            existingAttrs.customAttributes &&
+            typeof existingAttrs.customAttributes === 'object' &&
+            !Array.isArray(existingAttrs.customAttributes)
+              ? (existingAttrs.customAttributes as Record<string, unknown>)
+              : {};
+          attributesPayload = {
+            ...existingAttrs,
+            customAttributes: { ...existingCustom, ...customAttributes },
+          } as unknown as Prisma.InputJsonValue;
+        }
+      } else {
+        const defaults = defaultAttributes({ price, comparePrice, name, description, brand, origin });
+        attributesPayload = {
+          ...defaults,
+          ...(Object.keys(customAttributes).length > 0 ? { customAttributes } : {}),
+        } as unknown as Prisma.InputJsonValue;
+      }
 
       const data = {
         slug,
@@ -207,11 +299,8 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
         origin,
         inStock,
         images,
-        // Only set attributes on CREATE — preserve hand-edited attributes
-        // on existing products so a CSV refresh of pricing/copy doesn't
-        // wipe carefully tuned bundles/features/specs.
-        ...(existing ? {} : { attributes: attributes as unknown as Prisma.InputJsonValue }),
-        categoryId,
+        ...(attributesPayload !== undefined ? { attributes: attributesPayload } : {}),
+        categoryId: leafCategoryId,
       };
 
       if (existing) {
@@ -222,7 +311,8 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
         await prisma.product.create({
           data: {
             ...data,
-            attributes: attributes as unknown as Prisma.InputJsonValue,
+            // CREATE always writes attributes (defaults at minimum).
+            attributes: (attributesPayload ?? {}) as Prisma.InputJsonValue,
           },
         });
         created++;
@@ -246,17 +336,18 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
     skipped,
     errors,
     results,
+    unknownColumns,
   };
 }
 
 export const BULK_TEMPLATE_CSV = [
-  'slug,name,brand,price,comparePrice,categorySlug,origin,inStock,shortDescription,description,ingredients,images',
-  // Full row — every column populated:
-  'example-product,Example Product,Example Brand,1500,2000,groceries,NG,true,A short tagline,A longer description goes here,Sucrose|Coconut Oil,https://example.com/img1.jpg|https://example.com/img2.jpg',
-  // Slug omitted — auto-generated from name as "another-example-product":
-  ',Another Example Product,,800,,beauty,KE,true,A nice short blurb,,,',
-  // Unknown category — auto-created on import:
-  ',Brand New Category Item,,1200,,furniture,NG,true,,,,',
+  'slug,name,brand,price,comparePrice,categorySlug,subcategorySlug,origin,inStock,shortDescription,description,ingredients,images',
+  // Full row — every column populated, with subcategory:
+  'example-product,Example Product,Example Brand,1500,2000,groceries,fresh-fruits,NG,true,A short tagline,A longer description goes here,Sucrose|Coconut Oil,https://example.com/img1.jpg|https://example.com/img2.jpg',
+  // Slug omitted (auto-generated) and no subcategory:
+  ',Another Example Product,,800,,beauty,,KE,true,A nice short blurb,,,',
+  // Unknown category + unknown subcategory — both auto-created on import:
+  ',Brand New Category Item,,1200,,furniture,living-room,NG,true,,,,',
   // Out of stock + minimal:
-  'example-out-of-stock,Out of Stock Example,,500,,beauty,GH,false,Currently unavailable,,,',
+  'example-out-of-stock,Out of Stock Example,,500,,beauty,,GH,false,Currently unavailable,,,',
 ].join('\n');
