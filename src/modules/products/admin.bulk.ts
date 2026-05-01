@@ -41,7 +41,9 @@ const KNOWN_COLUMNS = new Set([
   'origin',
   'inStock',
   'images',
+  'category',
   'categorySlug',
+  'subcategory',
   'subcategorySlug',
 ]);
 
@@ -171,14 +173,21 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
         throw new Error(`Invalid comparePrice "${compareStr}"`);
       }
 
-      // Category resolution: pull from cache; auto-create if the slug
-      // is unknown. A subcategorySlug, when present, becomes the leaf
-      // (the product's categoryId points at the deepest known node).
-      const categorySlug = row.categorySlug?.trim() || null;
-      const subcategorySlug = row.subcategorySlug?.trim() || null;
+      // Category resolution: admins can supply either a slug-formatted
+      // column (for explicit control) or a human-readable name column
+      // (we slugify it). The slug column wins when both are provided.
+      // The display name on a freshly-created category prefers the
+      // human name over a humanized slug — so "Sauces & Pastes" stays
+      // titled "Sauces & Pastes" instead of "Sauces  Pastes".
+      const categoryName = row.category?.trim() || null;
+      const categorySlug =
+        row.categorySlug?.trim() || (categoryName ? slugify(categoryName) : null);
+      const subcategoryName = row.subcategory?.trim() || null;
+      const subcategorySlug =
+        row.subcategorySlug?.trim() || (subcategoryName ? slugify(subcategoryName) : null);
 
       if (subcategorySlug && !categorySlug) {
-        throw new Error('subcategorySlug requires a categorySlug (subcategories must have a parent)');
+        throw new Error('subcategory requires a category (subcategories must have a parent)');
       }
 
       let parentCategoryId: string | null = null;
@@ -190,7 +199,7 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
           const fresh = await prisma.category.create({
             data: {
               slug: categorySlug,
-              name: humanizeSlug(categorySlug),
+              name: categoryName ?? humanizeSlug(categorySlug),
             },
             select: { id: true, slug: true, parentId: true },
           });
@@ -220,7 +229,7 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
           const fresh = await prisma.category.create({
             data: {
               slug: subcategorySlug,
-              name: humanizeSlug(subcategorySlug),
+              name: subcategoryName ?? humanizeSlug(subcategorySlug),
               parentId: parentCategoryId,
             },
             select: { id: true, slug: true, parentId: true },
@@ -341,13 +350,16 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
 }
 
 export const BULK_TEMPLATE_CSV = [
-  'slug,name,brand,price,comparePrice,categorySlug,subcategorySlug,origin,inStock,shortDescription,description,ingredients,images',
-  // Full row — every column populated, with subcategory:
-  'example-product,Example Product,Example Brand,1500,2000,groceries,fresh-fruits,NG,true,A short tagline,A longer description goes here,Sucrose|Coconut Oil,https://example.com/img1.jpg|https://example.com/img2.jpg',
-  // Slug omitted (auto-generated) and no subcategory:
-  ',Another Example Product,,800,,beauty,,KE,true,A nice short blurb,,,',
-  // Unknown category + unknown subcategory — both auto-created on import:
-  ',Brand New Category Item,,1200,,furniture,living-room,NG,true,,,,',
+  'name,brand,price,comparePrice,category,subcategory,origin,inStock,shortDescription,description,ingredients,images',
+  // Recommended form — human-readable category and subcategory names.
+  // Slugs are auto-derived; if the names don't exist yet they're
+  // auto-created.
+  'Tomato Paste,Local Brand,500,700,Groceries,Sauces & Pastes,NG,true,Rich African tomato concentrate,Made from sun-ripened tomatoes,,https://example.com/tomato.jpg',
+  // Multiple products under the same auto-created category + subcategory:
+  'Honey,Wild Bee,1200,,Groceries,Sweeteners,NG,true,Pure raw honey,,,',
+  'Brown Sugar,Refined Co,800,,Groceries,Sweeteners,NG,true,,,,',
+  // Top-level category only — no subcategory:
+  'Lipstick,Tara,1500,2000,Beauty,,KE,true,Long-lasting matte,,,https://example.com/lipstick.jpg',
   // Out of stock + minimal:
-  'example-out-of-stock,Out of Stock Example,,500,,beauty,,GH,false,Currently unavailable,,,',
+  'Discontinued Item,,500,,Beauty,,GH,false,Currently unavailable,,,',
 ].join('\n');
