@@ -203,3 +203,70 @@ export async function adminDeleteProduct(id: string): Promise<void> {
   await prisma.review.deleteMany({ where: { productId: id } });
   await prisma.product.delete({ where: { id } });
 }
+
+export interface BulkActionResult {
+  /** Number of products the action was applied to. */
+  affected: number;
+  /** IDs that were rejected (e.g. delete blocked because the product has
+   *  orders) along with the reason. The bulk action otherwise succeeds
+   *  for the remaining IDs — partial success is preferable to all-or-
+   *  nothing because admins doing big sweeps don't want one stuck row to
+   *  block the rest. */
+  skipped: Array<{ id: string; reason: string }>;
+}
+
+export type BulkAction =
+  | { kind: 'delete' }
+  | { kind: 'set-in-stock'; value: boolean }
+  | { kind: 'set-category'; categorySlug: string | null };
+
+export async function adminBulkProductAction(
+  ids: string[],
+  action: BulkAction,
+): Promise<BulkActionResult> {
+  if (ids.length === 0) return { affected: 0, skipped: [] };
+
+  if (action.kind === 'delete') {
+    // Refuse to delete products with order history — same rule as the
+    // single-delete path. Surface them as `skipped` so the admin sees
+    // exactly which rows didn't go through and can mark them
+    // out-of-stock instead.
+    const referenced = await prisma.orderItem.findMany({
+      where: { productId: { in: ids } },
+      select: { productId: true },
+      distinct: ['productId'],
+    });
+    const referencedIds = new Set(referenced.map((r) => r.productId));
+    const deletable = ids.filter((id) => !referencedIds.has(id));
+    if (deletable.length > 0) {
+      await prisma.$transaction([
+        prisma.cartItem.deleteMany({ where: { productId: { in: deletable } } }),
+        prisma.review.deleteMany({ where: { productId: { in: deletable } } }),
+        prisma.product.deleteMany({ where: { id: { in: deletable } } }),
+      ]);
+    }
+    return {
+      affected: deletable.length,
+      skipped: [...referencedIds].map((id) => ({
+        id,
+        reason: 'Has order history — mark out of stock instead',
+      })),
+    };
+  }
+
+  if (action.kind === 'set-in-stock') {
+    const r = await prisma.product.updateMany({
+      where: { id: { in: ids } },
+      data: { inStock: action.value },
+    });
+    return { affected: r.count, skipped: [] };
+  }
+
+  // set-category
+  const categoryId = await resolveCategoryId(action.categorySlug);
+  const r = await prisma.product.updateMany({
+    where: { id: { in: ids } },
+    data: { categoryId },
+  });
+  return { affected: r.count, skipped: [] };
+}

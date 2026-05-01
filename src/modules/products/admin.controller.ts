@@ -7,6 +7,7 @@ import {
   upsertProductBodySchema,
 } from './admin.schema';
 import {
+  adminBulkProductAction,
   adminCreateProduct,
   adminDeleteProduct,
   adminGetProduct,
@@ -17,6 +18,15 @@ import { BULK_TEMPLATE_CSV, bulkUploadProducts } from './admin.bulk';
 
 const bulkUploadBodySchema = z.object({
   csv: z.string().min(1, 'csv body is required'),
+});
+
+const bulkActionBodySchema = z.object({
+  ids: z.array(z.string().min(1)).min(1, 'Pick at least one product').max(500, 'Up to 500 products per call'),
+  action: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('delete') }),
+    z.object({ kind: z.literal('set-in-stock'), value: z.boolean() }),
+    z.object({ kind: z.literal('set-category'), categorySlug: z.string().min(1).nullable() }),
+  ]),
 });
 
 export async function adminListProductsHandler(
@@ -70,6 +80,14 @@ export async function adminBulkUploadHandler(
 ): Promise<void> {
   const { csv } = bulkUploadBodySchema.parse(req.body);
   res.json(await bulkUploadProducts(csv));
+}
+
+export async function adminBulkActionHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const body = bulkActionBodySchema.parse(req.body);
+  res.json(await adminBulkProductAction(body.ids, body.action));
 }
 
 export function adminBulkTemplateHandler(_req: Request, res: Response): void {
