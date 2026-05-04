@@ -23,6 +23,7 @@ import { adminBusinessRuleRoutes } from '@/modules/business-rules/admin.routes';
 import { adminCmsRoutes } from '@/modules/cms/admin.routes';
 import { adminPlacementsRoutes } from '@/modules/placements/admin.routes';
 import { adminBlogRoutes } from '@/modules/blog/admin.routes';
+import { adminContentRoutes } from '@/modules/content/admin.routes';
 
 /**
  * Composes every domain module's admin surface under a single auth gate.
@@ -61,4 +62,5 @@ adminRouter.use('/feature-flags', adminFeatureFlagRoutes);
 adminRouter.use('/business-rules', adminBusinessRuleRoutes);
 adminRouter.use('/pages', adminCmsRoutes);
 adminRouter.use('/blog', adminBlogRoutes);
+adminRouter.use('/content', adminContentRoutes);
 adminRouter.use('/placements', adminPlacementsRoutes);
