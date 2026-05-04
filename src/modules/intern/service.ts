@@ -9,6 +9,41 @@ import type {
   SubmitImagesBody,
 } from './schema';
 
+/// Setting key holding the default pay rate (NGN) for an approved
+/// product. Snapshotted onto each submission at create time so a
+/// later rate change doesn't retroactively shift what's owed for
+/// already-completed work.
+const PAY_RATE_SETTING_KEY = 'intern.pay_rate_ngn';
+
+export async function getDefaultPayRate(): Promise<number> {
+  const row = await prisma.setting.findUnique({
+    where: { key: PAY_RATE_SETTING_KEY },
+    select: { value: true },
+  });
+  if (!row) return 0;
+  const v = row.value;
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
+}
+
+export async function setDefaultPayRate(
+  rate: number,
+  authorId: string | null,
+): Promise<{ rate: number }> {
+  if (!Number.isFinite(rate) || rate < 0) {
+    throw HttpError.badRequest('Pay rate must be a non-negative integer in NGN');
+  }
+  await prisma.setting.upsert({
+    where: { key: PAY_RATE_SETTING_KEY },
+    update: { value: Math.round(rate), updatedByUserId: authorId },
+    create: {
+      key: PAY_RATE_SETTING_KEY,
+      value: Math.round(rate),
+      updatedByUserId: authorId,
+    },
+  });
+  return { rate: Math.round(rate) };
+}
+
 // =============================================================
 // INTERN-FACING HELPERS
 // =============================================================
@@ -142,6 +177,11 @@ export async function submitImages(
     );
   }
 
+  // Snapshot the current pay rate. If admin changes the rate later,
+  // this submission's pay stays locked to whatever was set at submit
+  // time.
+  const payRate = await getDefaultPayRate();
+
   return prisma.productImageSubmission.create({
     data: {
       productId,
@@ -151,6 +191,7 @@ export async function submitImages(
       sideImageUrl: body.sideImageUrl,
       additionalImages: body.additionalImages,
       status: 'PENDING_REVIEW',
+      payRate,
     },
     select: {
       id: true,
@@ -425,4 +466,88 @@ export async function reviewSubmission(
     }),
   ]);
   return updated;
+}
+
+/**
+ * Approved-submission export for payroll. Returns one row per
+ * approved submission within the date window (filter on `reviewedAt`,
+ * which is when payment becomes payable). Optional internId narrows
+ * to a single contractor.
+ *
+ * Excludes pending + rejected — only paid work gets exported, so the
+ * admin can hand the CSV straight to finance without manual filtering.
+ */
+export async function getApprovedExport(filters: {
+  fromDate?: Date;
+  toDate?: Date;
+  internId?: string;
+}): Promise<Array<{
+  internName: string;
+  internEmail: string;
+  productSlug: string;
+  productName: string;
+  submissionId: string;
+  approvedAt: string;
+  payRateNgn: number;
+}>> {
+  const where: Prisma.ProductImageSubmissionWhereInput = {
+    status: 'APPROVED',
+    reviewedAt: { not: null },
+  };
+  if (filters.internId) where.internId = filters.internId;
+  if (filters.fromDate || filters.toDate) {
+    where.reviewedAt = {
+      ...(filters.fromDate ? { gte: filters.fromDate } : {}),
+      ...(filters.toDate ? { lte: filters.toDate } : {}),
+    };
+  }
+
+  const rows = await prisma.productImageSubmission.findMany({
+    where,
+    orderBy: { reviewedAt: 'asc' },
+    select: {
+      id: true,
+      reviewedAt: true,
+      payRate: true,
+      intern: { select: { name: true, email: true } },
+      product: { select: { slug: true, name: true } },
+    },
+  });
+
+  return rows.map((r) => ({
+    internName: r.intern.name ?? '',
+    internEmail: r.intern.email,
+    productSlug: r.product.slug,
+    productName: r.product.name,
+    submissionId: r.id,
+    approvedAt: (r.reviewedAt ?? new Date()).toISOString(),
+    payRateNgn: r.payRate,
+  }));
+}
+
+/**
+ * Per-intern totals over the same date window — useful for a payday
+ * summary at the top of the export. Returned as JSON; the CSV
+ * endpoint embeds it as a comment block above the line items.
+ */
+export async function getApprovedTotals(filters: {
+  fromDate?: Date;
+  toDate?: Date;
+  internId?: string;
+}): Promise<Array<{ internName: string; internEmail: string; count: number; totalNgn: number }>> {
+  const rows = await getApprovedExport(filters);
+  const byEmail = new Map<string, { internName: string; internEmail: string; count: number; totalNgn: number }>();
+  for (const r of rows) {
+    const key = r.internEmail;
+    const cur = byEmail.get(key) ?? {
+      internName: r.internName,
+      internEmail: r.internEmail,
+      count: 0,
+      totalNgn: 0,
+    };
+    cur.count += 1;
+    cur.totalNgn += r.payRateNgn;
+    byEmail.set(key, cur);
+  }
+  return [...byEmail.values()].sort((a, b) => b.totalNgn - a.totalNgn);
 }

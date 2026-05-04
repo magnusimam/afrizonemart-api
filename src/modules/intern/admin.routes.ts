@@ -3,10 +3,13 @@ import { asyncHandler } from '@/middleware/async-handler';
 import { requireRole } from '@/middleware/require-role';
 import {
   adminBulkAssignHandler,
+  adminExportCsvHandler,
+  adminGetPayRateHandler,
   adminGetProgressHandler,
   adminListSubmissionsHandler,
   adminReassignHandler,
   adminReviewSubmissionHandler,
+  adminSetPayRateHandler,
 } from './controller';
 
 /// Admin endpoints for the intern image-update workflow. Mounted
@@ -25,3 +28,8 @@ adminInternRoutes.post(
   '/submissions/:id/review',
   asyncHandler(adminReviewSubmissionHandler),
 );
+
+adminInternRoutes.get('/pay-rate', asyncHandler(adminGetPayRateHandler));
+adminInternRoutes.put('/pay-rate', asyncHandler(adminSetPayRateHandler));
+
+adminInternRoutes.get('/export.csv', asyncHandler(adminExportCsvHandler));

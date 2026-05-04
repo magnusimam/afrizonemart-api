@@ -10,11 +10,15 @@ import {
 import {
   bulkAssign,
   claimFromUnassignedPool,
+  getApprovedExport,
+  getApprovedTotals,
+  getDefaultPayRate,
   getInternProgress,
   getInternQueue,
   listSubmissionsForReview,
   reassign,
   reviewSubmission,
+  setDefaultPayRate,
   submitImages,
 } from './service';
 
@@ -81,4 +85,94 @@ export async function adminReviewSubmissionHandler(req: Request, res: Response):
   const reviewerId = (req as AuthedReq).user?.id;
   if (!reviewerId) throw HttpError.unauthorized();
   res.json(await reviewSubmission(submissionId, body, reviewerId));
+}
+
+// ---- Pay rate setting ---------------------------------------------
+
+export async function adminGetPayRateHandler(_req: Request, res: Response): Promise<void> {
+  res.json({ rate: await getDefaultPayRate() });
+}
+
+export async function adminSetPayRateHandler(req: Request, res: Response): Promise<void> {
+  const rate = Number(req.body?.rate);
+  if (!Number.isFinite(rate) || rate < 0) {
+    throw HttpError.badRequest('Body must be { "rate": <NGN integer ≥ 0> }');
+  }
+  const reviewerId = (req as AuthedReq).user?.id ?? null;
+  res.json(await setDefaultPayRate(rate, reviewerId));
+}
+
+// ---- CSV export for payday ----------------------------------------
+
+function parseDateParam(v: unknown): Date | undefined {
+  if (typeof v !== 'string' || !v) return undefined;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d;
+}
+
+function escapeCsvCell(value: string | number): string {
+  const s = String(value);
+  // RFC 4180: quote when the cell contains comma / quote / newline,
+  // and double-up any embedded quotes.
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+export async function adminExportCsvHandler(req: Request, res: Response): Promise<void> {
+  const fromDate = parseDateParam(req.query.from);
+  const toDate = parseDateParam(req.query.to);
+  const internId = (req.query.internId as string | undefined) || undefined;
+
+  const [rows, totals] = await Promise.all([
+    getApprovedExport({ fromDate, toDate, internId }),
+    getApprovedTotals({ fromDate, toDate, internId }),
+  ]);
+
+  const totalRows = rows.length;
+  const totalNgn = rows.reduce((acc, r) => acc + r.payRateNgn, 0);
+
+  const lines: string[] = [];
+  // Top-of-file header block — readable in Excel as comments since
+  // every line starts with #. Finance can ignore or strip.
+  lines.push(`# Afrizonemart intern image-update payroll export`);
+  lines.push(`# Generated: ${new Date().toISOString()}`);
+  if (fromDate) lines.push(`# From: ${fromDate.toISOString()}`);
+  if (toDate) lines.push(`# To: ${toDate.toISOString()}`);
+  if (internId) lines.push(`# Intern filter: ${internId}`);
+  lines.push(`# Total approved: ${totalRows} · Total payable: NGN ${totalNgn.toLocaleString('en-NG')}`);
+  for (const t of totals) {
+    lines.push(
+      `# ${t.internName || '(no name)'} <${t.internEmail}>: ${t.count} approved · NGN ${t.totalNgn.toLocaleString('en-NG')}`,
+    );
+  }
+  lines.push('');
+
+  // CSV header + rows
+  lines.push(
+    'intern_name,intern_email,product_slug,product_name,submission_id,approved_at,pay_rate_ngn',
+  );
+  for (const r of rows) {
+    lines.push(
+      [
+        r.internName,
+        r.internEmail,
+        r.productSlug,
+        r.productName,
+        r.submissionId,
+        r.approvedAt,
+        r.payRateNgn,
+      ]
+        .map(escapeCsvCell)
+        .join(','),
+    );
+  }
+
+  const filenameStamp = new Date().toISOString().slice(0, 10);
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set(
+    'Content-Disposition',
+    `attachment; filename="intern-payroll-${filenameStamp}.csv"`,
+  );
+  res.send(lines.join('\n'));
 }
