@@ -24,6 +24,7 @@ import { adminCmsRoutes } from '@/modules/cms/admin.routes';
 import { adminPlacementsRoutes } from '@/modules/placements/admin.routes';
 import { adminBlogRoutes } from '@/modules/blog/admin.routes';
 import { adminContentRoutes } from '@/modules/content/admin.routes';
+import { adminInternRoutes } from '@/modules/intern/admin.routes';
 
 /**
  * Composes every domain module's admin surface under a single auth gate.
@@ -63,4 +64,5 @@ adminRouter.use('/business-rules', adminBusinessRuleRoutes);
 adminRouter.use('/pages', adminCmsRoutes);
 adminRouter.use('/blog', adminBlogRoutes);
 adminRouter.use('/content', adminContentRoutes);
+adminRouter.use('/intern', adminInternRoutes);
 adminRouter.use('/placements', adminPlacementsRoutes);

@@ -55,6 +55,14 @@ model User {
   blogPosts      BlogPost[]         @relation("BlogPostAuthor")
   uploadedAssets MediaAsset[]       @relation("MediaAssetUploader")
   pageRevisions  PageRevision[]     @relation("PageRevisionAuthor")
+  /// Products assigned to this user as part of the intern image-
+  /// update workflow. Reassignment moves products in/out of this list.
+  assignedProducts        Product[]                @relation("ProductInternAssignee")
+  /// Image-update submissions this user has made (intern role).
+  internSubmissions       ProductImageSubmission[] @relation("InternSubmissionAuthor")
+  /// Image-update submissions this user has approved or rejected
+  /// (admin/reviewer role).
+  reviewedSubmissions     ProductImageSubmission[] @relation("InternSubmissionReviewer")
 
   @@index([email])
   @@index([phone])
@@ -111,11 +119,20 @@ model Product {
   orderItems OrderItem[]
   placements ProductPlacement[]
 
+  /// Intern assignment for the bulk image-update workflow. The named
+  /// intern owns this product's image slot until reassigned. Null when
+  /// the product is in the unassigned pool (admin can bulk-assign or
+  /// an intern can claim from it).
+  assignedInternId   String?
+  assignedIntern     User?                    @relation("ProductInternAssignee", fields: [assignedInternId], references: [id], onDelete: SetNull)
+  imageSubmissions   ProductImageSubmission[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([categoryId])
   @@index([origin])
+  @@index([assignedInternId])
 }
 
 model Review {
@@ -1010,4 +1027,54 @@ model BlogPost {
 
   @@index([status, publishedAt(sort: Desc)])
   @@index([slug])
+}
+
+// -----------------------------------------------------------------
+// Intern image-update workflow.
+//
+// Each ProductImageSubmission is one (intern, product) attempt: front
+// + back + side images plus optional extras. Submissions go into a
+// PENDING_REVIEW queue; admin approves (publishes images to
+// Product.images, intern gets paid) or rejects with a reason. Rejected
+// submissions can be re-submitted — that creates a new row, leaving
+// the rejected one as history. The intern's payable count is just
+// `WHERE internId = me AND status = APPROVED`.
+// -----------------------------------------------------------------
+
+enum ImageSubmissionStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+model ProductImageSubmission {
+  id              String                @id @default(cuid())
+  productId       String
+  product         Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  internId        String
+  intern          User                  @relation("InternSubmissionAuthor", fields: [internId], references: [id], onDelete: Cascade)
+  status          ImageSubmissionStatus @default(PENDING_REVIEW)
+  /// Required image roles. The intern must upload all three before
+  /// the API will accept the submission. Stored as named fields for
+  /// simplicity; additional images go into `additionalImages`.
+  frontImageUrl   String
+  backImageUrl    String
+  sideImageUrl    String
+  additionalImages String[]             @default([])
+  /// Filled when status flips to REJECTED. Surfaced to the intern in
+  /// their queue so they know what to fix.
+  rejectionReason String?
+  reviewedById    String?
+  reviewedBy      User?                 @relation("InternSubmissionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+  /// Pay rate snapshot in NGN at submission time. Locked here so a
+  /// later rate change doesn't retroactively change what's owed for
+  /// already-approved work.
+  payRate         Int                   @default(0)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@index([internId, status])
+  @@index([productId])
+  @@index([status, createdAt])
 }
