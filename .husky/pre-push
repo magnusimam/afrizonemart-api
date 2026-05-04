@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+# Local gate before code leaves the laptop. Mirrors GitHub Actions CI
+# so anything that would fail on the PR fails here first. Prisma client
+# must regenerate before tsc — types come from the generated client.
+#
+# Skip with: `git push --no-verify` — only when you genuinely know what
+# you're doing (e.g. pushing a branch that's known-WIP for review).
+
+set -e
+
+echo "→ Prisma generate"
+npx prisma generate
+
+echo "→ TypeScript"
+npx tsc --noEmit
+
+echo "✓ Pre-push checks passed"
