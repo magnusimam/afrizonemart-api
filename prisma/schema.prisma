@@ -21,28 +21,31 @@ enum UserRole {
 }
 
 model User {
-  id                String   @id @default(cuid())
-  email             String   @unique
-  passwordHash      String
-  name              String?
+  id               String   @id @default(cuid())
+  email            String   @unique
+  passwordHash     String
+  name             String?
   /// Optional E.164 phone (e.g. "+2348012345678"). Set by SMS auth flow.
-  phone             String?  @unique
+  phone            String?  @unique
   /// Google subject id when the account was first linked via Google OAuth.
   /// We store it so we can identify the same Google user across email
   /// changes. Null for password-only or phone-only users.
-  googleId          String?  @unique
+  googleId         String?  @unique
   /// Picture URL from the OAuth provider — handy for avatars.
-  avatarUrl         String?
-  role              UserRole @default(CUSTOMER)
+  avatarUrl        String?
+  role             UserRole @default(CUSTOMER)
   // Refresh tokens are hashed before storage so a DB leak doesn't grant
   // session access. Null when the user has logged out everywhere.
-  refreshTokenHash  String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  refreshTokenHash String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  cart              Cart?
-  orders            Order[]
-  redemptions       CouponRedemption[]
+  cart           Cart?
+  orders         Order[]
+  redemptions    CouponRedemption[]
+  blogPosts      BlogPost[]         @relation("BlogPostAuthor")
+  uploadedAssets MediaAsset[]       @relation("MediaAssetUploader")
+  pageRevisions  PageRevision[]     @relation("PageRevisionAuthor")
 
   @@index([email])
   @@index([phone])
@@ -69,55 +72,55 @@ model Category {
 }
 
 model Product {
-  id                String   @id @default(cuid())
-  slug              String   @unique
-  name              String
-  brand             String?
-  shortDescription  String?  @db.Text
-  description       String?  @db.Text
-  ingredients       String?  @db.Text
+  id               String   @id @default(cuid())
+  slug             String   @unique
+  name             String
+  brand            String?
+  shortDescription String?  @db.Text
+  description      String?  @db.Text
+  ingredients      String?  @db.Text
   // Money values in Naira (whole units). Was previously documented as kobo
   // but the seed and frontend formatter both treat these as Naira.
-  price             Int
-  comparePrice      Int?
-  discountPercent   Int?
-  origin            String?  // 2-letter ISO country code, e.g. "NG", "KE"
-  inStock           Boolean  @default(true)
-  rating            Float    @default(0)
-  reviewCount       Int      @default(0)
+  price            Int
+  comparePrice     Int?
+  discountPercent  Int?
+  origin           String? // 2-letter ISO country code, e.g. "NG", "KE"
+  inStock          Boolean  @default(true)
+  rating           Float    @default(0)
+  reviewCount      Int      @default(0)
   // Image URLs as a JSON array — flexible without a side table for now.
-  images            String[]
+  images           String[]
   // Schema-Driven attributes (Principle #4): bundles, features, specs,
   // variants, aboutTitle/body/image — anything that varies by product
   // type without needing a column per attribute.
-  attributes        Json     @default("{}")
+  attributes       Json     @default("{}")
 
-  categoryId        String?
-  category          Category? @relation(fields: [categoryId], references: [id])
-  reviews           Review[]
-  cartItems         CartItem[]
-  orderItems        OrderItem[]
-  placements        ProductPlacement[]
+  categoryId String?
+  category   Category?          @relation(fields: [categoryId], references: [id])
+  reviews    Review[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  placements ProductPlacement[]
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([categoryId])
   @@index([origin])
 }
 
 model Review {
-  id          String   @id @default(cuid())
-  productId   String
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  authorName  String
-  authorCountry String?  // 2-letter ISO
-  rating      Int
-  title       String?
-  body        String   @db.Text
-  verified    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(cuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  authorName    String
+  authorCountry String? // 2-letter ISO
+  rating        Int
+  title         String?
+  body          String   @db.Text
+  verified      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([productId])
 }
@@ -127,20 +130,20 @@ model Review {
 // -----------------------------------------------------------------
 
 model Cart {
-  id        String     @id @default(cuid())
-  userId    String     @unique
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items     CartItem[]
+  id                  String     @id @default(cuid())
+  userId              String     @unique
+  user                User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items               CartItem[]
   // Currently-applied coupon. Carries through cart edits so a user
   // can change quantities without losing their discount. Re-validated
   // at place-order time.
-  couponId  String?
-  coupon    Coupon?    @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  couponId            String?
+  coupon              Coupon?    @relation(fields: [couponId], references: [id], onDelete: SetNull)
   // Phase Audit.9 — set the moment we send a recovery email so we don't
   // re-spam the user. Cleared whenever the cart is modified.
   abandonedNotifiedAt DateTime?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
   @@index([updatedAt, abandonedNotifiedAt])
 }
@@ -210,53 +213,53 @@ model Payment {
 }
 
 model Order {
-  id              String        @id @default(cuid())
+  id           String      @id @default(cuid())
   // Short, user-facing order number — generated at create time.
-  orderNumber     String        @unique
-  userId          String
-  user            User          @relation(fields: [userId], references: [id])
-  status          OrderStatus   @default(PENDING_PAYMENT)
+  orderNumber  String      @unique
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  status       OrderStatus @default(PENDING_PAYMENT)
   // Money in Naira (whole units), snapshot at order time.
-  subtotal        Int
-  shippingCost    Int           @default(0)
-  total           Int
-  currency        String        @default("NGN")
+  subtotal     Int
+  shippingCost Int         @default(0)
+  total        Int
+  currency     String      @default("NGN")
 
   // Shipping address snapshot
   shipFullName    String
   shipPhone       String
   shipAddressLine String
   shipCity        String
-  shipCountry     String        // 2-letter ISO
+  shipCountry     String // 2-letter ISO
 
-  paymentMethod   PaymentMethod @default(PAYSTACK)
+  paymentMethod PaymentMethod @default(PAYSTACK)
   // External payment reference (gateway txn id) once payment succeeds.
-  paymentRef      String?
+  paymentRef    String?
 
   // Mirror of sum(refunds.amount) — kept in sync via service layer so
   // we can render "₦X refunded of ₦Y" without aggregating on every read.
-  refundedTotal   Int           @default(0)
-  cancelledAt     DateTime?
+  refundedTotal Int       @default(0)
+  cancelledAt   DateTime?
 
   // Coupon snapshot at order time (code + discount in Naira). The full
   // coupon record is referenced via CouponRedemption for usage-cap
   // accounting; this snapshot is for display.
-  couponCode      String?
-  couponDiscount  Int           @default(0)
+  couponCode     String?
+  couponDiscount Int     @default(0)
 
   // Selected shipping rate at order time (nullable for legacy orders
   // placed before Phase 4 landed).
-  shippingRateId  String?
-  shippingRate    ShippingRate? @relation(fields: [shippingRateId], references: [id])
+  shippingRateId String?
+  shippingRate   ShippingRate? @relation(fields: [shippingRateId], references: [id])
 
-  items           OrderItem[]
-  events          OrderEvent[]
-  refunds         Refund[]
-  redemptions     CouponRedemption[]
-  payments        Payment[]
+  items       OrderItem[]
+  events      OrderEvent[]
+  refunds     Refund[]
+  redemptions CouponRedemption[]
+  payments    Payment[]
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([status])
@@ -292,9 +295,9 @@ model OrderEvent {
 }
 
 enum RefundStatus {
-  RECORDED  // Admin marked refund; gateway call not yet made
-  SETTLED   // Gateway confirmed money returned
-  FAILED    // Gateway rejected or reversed
+  RECORDED // Admin marked refund; gateway call not yet made
+  SETTLED // Gateway confirmed money returned
+  FAILED // Gateway rejected or reversed
 }
 
 model Refund {
@@ -319,49 +322,49 @@ model Refund {
 // -----------------------------------------------------------------
 
 enum CouponType {
-  PERCENT_CART     // valuePercent off the cart subtotal
-  FIXED_CART       // valueAmount off the cart subtotal
-  FREE_SHIPPING    // forces shippingCost to 0
+  PERCENT_CART // valuePercent off the cart subtotal
+  FIXED_CART // valueAmount off the cart subtotal
+  FREE_SHIPPING // forces shippingCost to 0
 }
 
 model Coupon {
-  id                  String       @id @default(cuid())
+  id                 String     @id @default(cuid())
   // Stored uppercase. Apply is case-insensitive (uppercased before lookup).
-  code                String       @unique
-  description         String?
-  type                CouponType
+  code               String     @unique
+  description        String?
+  type               CouponType
   // Exactly one of these is meaningful per type — service enforces it.
-  valuePercent        Int?         // 1-100 for PERCENT_CART
-  valueAmount         Int?         // Naira whole units for FIXED_CART
-  minSubtotal         Int?         // require cart subtotal ≥ this
-  maxUses             Int?         // total uses across all customers
-  maxUsesPerCustomer  Int?         // per-customer cap
-  startsAt            DateTime?
-  endsAt              DateTime?
-  isActive            Boolean      @default(true)
+  valuePercent       Int? // 1-100 for PERCENT_CART
+  valueAmount        Int? // Naira whole units for FIXED_CART
+  minSubtotal        Int? // require cart subtotal ≥ this
+  maxUses            Int? // total uses across all customers
+  maxUsesPerCustomer Int? // per-customer cap
+  startsAt           DateTime?
+  endsAt             DateTime?
+  isActive           Boolean    @default(true)
   // Denormalized count for cheap list-view rendering. Source of truth
   // is `redemptions.count` — we keep this in sync via the service.
-  usageCount          Int          @default(0)
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  usageCount         Int        @default(0)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
 
-  redemptions         CouponRedemption[]
-  carts               Cart[]
+  redemptions CouponRedemption[]
+  carts       Cart[]
 
   @@index([code])
   @@index([isActive])
 }
 
 model CouponRedemption {
-  id                String   @id @default(cuid())
-  couponId          String
-  coupon            Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
-  userId            String
-  user              User     @relation(fields: [userId], references: [id])
-  orderId           String
-  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  amountDiscounted  Int
-  createdAt         DateTime @default(now())
+  id               String   @id @default(cuid())
+  couponId         String
+  coupon           Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  orderId          String
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountDiscounted Int
+  createdAt        DateTime @default(now())
 
   @@index([couponId])
   @@index([userId, couponId])
@@ -373,35 +376,35 @@ model CouponRedemption {
 // -----------------------------------------------------------------
 
 model ShippingZone {
-  id          String          @id @default(cuid())
-  name        String
+  id        String         @id @default(cuid())
+  name      String
   // ISO-2 country codes covered by this zone, e.g. ["NG"], ["KE","TZ","UG"].
   // Empty array = wildcard (matches any country); used together with
   // isDefault for the catch-all "Rest of world" zone.
-  countries   String[]
-  isDefault   Boolean         @default(false)
-  sortOrder   Int             @default(0)
-  rates       ShippingRate[]
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  countries String[]
+  isDefault Boolean        @default(false)
+  sortOrder Int            @default(0)
+  rates     ShippingRate[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
   @@index([isDefault])
 }
 
 model ShippingRate {
-  id                String       @id @default(cuid())
-  zoneId            String
-  zone              ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
-  name              String
+  id              String       @id @default(cuid())
+  zoneId          String
+  zone            ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  name            String
   // Naira whole units (matches order/product money convention).
-  priceAmount       Int          @default(0)
+  priceAmount     Int          @default(0)
   // Free above this subtotal threshold. Null = never auto-free.
-  freeAboveAmount   Int?
-  isDefault         Boolean      @default(false)
-  sortOrder         Int          @default(0)
-  orders            Order[]
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  freeAboveAmount Int?
+  isDefault       Boolean      @default(false)
+  sortOrder       Int          @default(0)
+  orders          Order[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@index([zoneId])
 }
@@ -413,19 +416,19 @@ model ShippingRate {
 // at top-level via the `redemptions` field below.)
 
 model OrderItem {
-  id              String   @id @default(cuid())
-  orderId         String
-  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId       String
-  product         Product  @relation(fields: [productId], references: [id])
+  id           String  @id @default(cuid())
+  orderId      String
+  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product @relation(fields: [productId], references: [id])
   // Snapshot the product fields so historical orders are stable even if
   // the catalog changes (price, name, image).
-  productSlug     String
-  productName     String
-  productImage    String?
-  unitPrice       Int
-  quantity        Int
-  lineTotal       Int
+  productSlug  String
+  productName  String
+  productImage String?
+  unitPrice    Int
+  quantity     Int
+  lineTotal    Int
 
   @@index([orderId])
   @@index([productId])
@@ -477,22 +480,22 @@ model AuditLog {
 // -----------------------------------------------------------------
 
 model Webhook {
-  id          String             @id @default(cuid())
-  name        String
-  url         String
+  id        String   @id @default(cuid())
+  name      String
+  url       String
   // Subscribed event names (e.g. 'order.placed', 'order.refunded').
   // Wildcard '*' subscribes to every event.
-  events      String[]
+  events    String[]
   // HMAC-SHA256 secret used to sign delivery payloads. Generated at
   // create time, returned once, hashed/stored at rest? For v1 we
   // store the raw secret since it's per-webhook and only admins
   // can read it; tighten later if needed.
-  secret      String
-  isActive    Boolean            @default(true)
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  secret    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  deliveries  WebhookDelivery[]
+  deliveries WebhookDelivery[]
 
   @@index([isActive])
 }
@@ -575,21 +578,21 @@ model Notification {
 // ------------------------------------------------------------------
 
 model ProductPlacement {
-  id          String   @id @default(cuid())
-  productId   String
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id        String    @id @default(cuid())
+  productId String
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   /// e.g. "homepage_hero", "for_her", "cms:black-friday"
-  placement   String
+  placement String
   /// Lower number = higher priority. Used to sort within a placement.
-  sortOrder   Int      @default(100)
+  sortOrder Int       @default(100)
   /// Optional time window. NULL = no constraint on that side.
-  startsAt    DateTime?
-  endsAt      DateTime?
+  startsAt  DateTime?
+  endsAt    DateTime?
   /// Optional country scope. Empty array = global (all countries).
   /// Otherwise only requests with a matching `country` code see this.
-  countries   String[] @default([])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  countries String[]  @default([])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@unique([productId, placement])
   @@index([placement, sortOrder])
@@ -604,19 +607,19 @@ model ProductPlacement {
 // ------------------------------------------------------------------
 
 model CmsPage {
-  id            String   @id @default(cuid())
+  id              String    @id @default(cuid())
   // URL path — unique. No leading slash. Use slashes for nesting.
-  slug          String   @unique
-  title         String
+  slug            String    @unique
+  title           String
   // SEO meta description.
-  metaDescription String? @db.Text
+  metaDescription String?   @db.Text
   // Body — array of blocks (hero / rich-text / image / image-grid / cta /
   // product-carousel). Renderer in components/cms/render-page.tsx
-  blocks        Json     @default("[]")
-  isPublished   Boolean  @default(false)
-  publishedAt   DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  blocks          Json      @default("[]")
+  isPublished     Boolean   @default(false)
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([isPublished])
 }
@@ -640,7 +643,7 @@ model CmsPage {
 
 model BusinessRule {
   id          String   @id @default(cuid())
-  scope       String   // "cart", "order", "fulfilment", "discount", …
+  scope       String // "cart", "order", "fulfilment", "discount", …
   key         String
   name        String
   description String?  @db.Text
@@ -677,20 +680,20 @@ model BusinessRule {
 // ------------------------------------------------------------------
 
 model FeatureFlag {
-  id              String   @id @default(cuid())
+  id             String   @id @default(cuid())
   // Stable key referenced from code (e.g. `useFlag('new_checkout')`).
-  key             String   @unique
-  name            String
-  description     String?  @db.Text
+  key            String   @unique
+  name           String
+  description    String?  @db.Text
   // Default boolean; non-boolean variants land in a future iteration.
-  defaultValue    Boolean  @default(false)
+  defaultValue   Boolean  @default(false)
   // Ordered list of targeting rules — first match wins.
-  targetingRules  Json     @default("[]")
+  targetingRules Json     @default("[]")
   // Master kill-switch. When false the flag always returns
   // defaultValue without evaluating rules.
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([key])
 }
@@ -709,28 +712,28 @@ model FeatureFlag {
 // ------------------------------------------------------------------
 
 model EmailTemplate {
-  id          String   @id @default(cuid())
+  id        String   @id @default(cuid())
   // Unique event key — must match a key the dispatcher emits
   // ("order.confirmed", "user.welcome", "password.reset", …).
-  type        String   @unique
+  type      String   @unique
   // Human-readable name shown in admin.
-  name        String
+  name      String
   // Subject line — supports `{variable}` substitution.
-  subject     String
+  subject   String
   // Block tree — see render-blocks.tsx for the supported block types.
   // Authored from /admin/email-templates.
-  body        Json     @default("[]")
+  body      Json     @default("[]")
   // Marketing-editable preview text (the snippet shown in the inbox
   // list under the subject). Optional.
-  preview     String?
+  preview   String?
   // When false the dispatcher falls back to the hardcoded TSX
   // template — handy if someone breaks a template in admin.
-  isActive    Boolean  @default(true)
+  isActive  Boolean  @default(true)
   // Soft system flag: templates seeded from code start as system.
   // Admin can edit but not delete them.
-  isSystem    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([type])
 }
@@ -745,45 +748,45 @@ model EmailTemplate {
 // ------------------------------------------------------------------
 
 model PaymentGatewayConfig {
-  id             String   @id @default(cuid())
+  id          String   @id @default(cuid())
   // Stable code key that maps to a registered factory class.
-  provider       String
+  provider    String
   // Human-readable label shown to the customer at checkout
   // (e.g. "Card / Squad", "Bank Transfer (Paystack)").
-  label          String
+  label       String
   // sandbox / live — providers usually have separate base URLs + keys.
-  environment    String   @default("sandbox")
+  environment String   @default("sandbox")
   // Hot toggle from admin without redeploying.
-  isActive       Boolean  @default(true)
+  isActive    Boolean  @default(true)
   // Lower number = higher in the checkout list.
-  priority       Int      @default(100)
+  priority    Int      @default(100)
   // Currencies this config can process (ISO 4217). Storefront filters
   // to gateways that accept the order's currency.
-  currencies     String[] @default(["NGN"])
+  currencies  String[] @default(["NGN"])
   // Provider-specific credentials. JSON so each provider can store
   // whatever shape it needs (Stripe has publishableKey + secretKey,
   // Paystack has secretKey + publicKey, M-Pesa has shortCode + ...).
   // NEVER returned to non-admin clients.
-  credentials    Json     @default("{}")
+  credentials Json     @default("{}")
   // Free-form non-secret metadata (display order, supported channels,
   // marketing copy) shown alongside the picker on the storefront.
-  metadata       Json     @default("{}")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([isActive, priority])
 }
 
 model PasswordResetToken {
-  id         String    @id @default(cuid())
-  userId     String
+  id        String    @id @default(cuid())
+  userId    String
   // Bcrypt-hashed token. The plaintext is only sent in the email; we
   // never store it. Confirm endpoint compares incoming plaintext
   // against this hash.
-  tokenHash  String
-  expiresAt  DateTime
-  usedAt     DateTime?
-  createdAt  DateTime  @default(now())
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
 
   @@index([userId])
   @@index([expiresAt])
@@ -806,16 +809,16 @@ enum CustomFieldScope {
 }
 
 enum CustomFieldType {
-  TEXT          // single-line text
-  LONGTEXT      // multi-line / textarea
-  NUMBER        // integer or decimal — uses min/max in `options`
-  BOOLEAN       // checkbox
-  URL           // generic URL — rendered as link
-  VIDEO         // YouTube / Vimeo / direct mp4 URL — rendered as embed
-  IMAGE         // image URL — rendered as <Image>
-  SELECT        // dropdown — choices in `options.choices: string[]`
-  JSON          // raw JSON for power users
-  RICHTEXT      // HTML/markdown body
+  TEXT // single-line text
+  LONGTEXT // multi-line / textarea
+  NUMBER // integer or decimal — uses min/max in `options`
+  BOOLEAN // checkbox
+  URL // generic URL — rendered as link
+  VIDEO // YouTube / Vimeo / direct mp4 URL — rendered as embed
+  IMAGE // image URL — rendered as <Image>
+  SELECT // dropdown — choices in `options.choices: string[]`
+  JSON // raw JSON for power users
+  RICHTEXT // HTML/markdown body
 }
 
 model CustomFieldDef {
@@ -847,4 +850,155 @@ model CustomFieldDef {
 
   @@unique([scope, key])
   @@index([scope, isActive, sortOrder])
+}
+
+// -----------------------------------------------------------------
+// Page builder (CMS Phase 1) — every storefront page becomes an
+// ordered list of typed PageSection records. The renderer fetches
+// them and dispatches each section to a component matching its
+// `type` discriminator. Mirrors how Webflow/Builder.io structure
+// dynamic pages, kept deliberately small (typed sections, not a
+// free canvas) so admins can't break the layout.
+// -----------------------------------------------------------------
+
+model Page {
+  id          String         @id @default(cuid())
+  /// URL identifier — "home", "deals", "new-arrivals", "shop/groceries".
+  /// No leading slash; slashes allowed for nesting.
+  slug        String         @unique
+  /// Display name shown in /admin/pages.
+  title       String
+  description String?
+  publishedAt DateTime?
+  sections    PageSection[]
+  revisions   PageRevision[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model PageSection {
+  id          String    @id @default(cuid())
+  pageId      String
+  page        Page      @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  /// Section discriminator — see SECTION_TYPES in API for the registry.
+  /// Examples: "hero", "product-grid", "category-shelf", "image-banner",
+  /// "rich-text", "africa-map", "newsletter", "trust-bar", "quotation-form".
+  type        String
+  /// Sort order — lower renders earlier. Reordered via drag in admin.
+  position    Int       @default(0)
+  /// Kill switch — set to false to hide without deleting.
+  visible     Boolean   @default(true)
+  /// Editable display heading (may be null for sections that own their
+  /// own copy, e.g. hero slides).
+  headline    String?
+  subheadline String?
+  /// Hex like "#0D1F4E" or palette key ("navy"/"amber"/...). The
+  /// renderer maps palette keys to brand tokens; raw hex passes through.
+  accentColor String?
+  /// Type-specific config. Schema enforced by zod in the API layer
+  /// per-section-type, never at the DB level (lets us add new types
+  /// without migrations).
+  config      Json      @default("{}")
+  /// Pending edits (Phase 2 draft/publish). When non-null, admin
+  /// preview reads this; storefront ignores it.
+  draftConfig Json?
+  /// Optional time window (Phase 2). Outside the window the section
+  /// is hidden from the storefront (admin always sees it).
+  startsAt    DateTime?
+  endsAt      DateTime?
+  /// Country targeting (Phase 2). Empty = global; otherwise only
+  /// requests with a matching ISO-2 code in the geo cookie see it.
+  countries   String[]  @default([])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([pageId, position])
+}
+
+model PageRevision {
+  id          String   @id @default(cuid())
+  pageId      String
+  page        Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  /// Snapshot of the entire section list as a JSON array. Used to
+  /// revert the page to a prior state in one click. We keep the last
+  /// 50 per page; older are pruned on save.
+  snapshot    Json
+  authorId    String?
+  author      User?    @relation("PageRevisionAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  /// Snapshot of author email at write time so the revision stays
+  /// readable after the user is deleted/renamed.
+  authorEmail String?
+  /// Optional commit-message-style note ("Black Friday banner live").
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([pageId, createdAt(sort: Desc)])
+}
+
+// -----------------------------------------------------------------
+// Image library (CMS Phase 2) — every R2 upload becomes a reusable
+// asset with required alt text. Picker replaces ad-hoc URL fields
+// across the admin UI.
+// -----------------------------------------------------------------
+
+model MediaAsset {
+  id           String   @id @default(cuid())
+  url          String   @unique
+  filename     String
+  mimeType     String
+  sizeBytes    Int
+  width        Int?
+  height       Int?
+  /// Required for SEO + a11y. Admin must set on upload.
+  alt          String
+  uploadedById String?
+  uploadedBy   User?    @relation("MediaAssetUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+}
+
+// -----------------------------------------------------------------
+// Blog (separate from CmsPage long-form). BlogPosts are indexed in
+// the sitemap, syndicated via /rss.xml, and emit Article JSON-LD.
+// -----------------------------------------------------------------
+
+enum BlogPostStatus {
+  DRAFT
+  PUBLISHED
+  SCHEDULED
+}
+
+model BlogPost {
+  id              String         @id @default(cuid())
+  slug            String         @unique
+  title           String
+  excerpt         String?        @db.Text
+  /// Body HTML. Authored via TipTap-style rich text editor in admin.
+  /// Sanitised on render.
+  content         String         @db.Text
+  heroImage       String?
+  heroImageAlt    String?
+  authorId        String?
+  author          User?          @relation("BlogPostAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  /// Snapshot of the author's display name at the time of write — so
+  /// posts keep attribution after staff turnover.
+  authorName      String?
+  status          BlogPostStatus @default(DRAFT)
+  /// Set when status flips to PUBLISHED. For SCHEDULED posts this is
+  /// the future date — a cron flips status at that time.
+  publishedAt     DateTime?
+  // SEO overrides — falls back to title/excerpt when blank.
+  metaTitle       String?
+  metaDescription String?        @db.Text
+  ogImage         String?
+  /// Free-form tags for filtering + cross-linking related posts.
+  tags            String[]       @default([])
+  /// Auto-computed on save (200 wpm) for the "X min read" badge.
+  readingTimeMin  Int?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([status, publishedAt(sort: Desc)])
+  @@index([slug])
 }

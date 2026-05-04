@@ -23,6 +23,9 @@ import { featureFlagRoutes } from '@/modules/feature-flags/routes';
 import { cmsRoutes } from '@/modules/cms/routes';
 import { fxRoutes } from '@/modules/fx/routes';
 import { categoryRoutes } from '@/modules/categories/routes';
+import { pageRoutes } from '@/modules/pages/routes';
+import { blogRoutes } from '@/modules/blog/routes';
+import { startScheduledBlogCron } from '@/modules/blog/cron';
 import { startWebhookDispatcher } from '@/modules/webhooks/dispatcher';
 import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
 import { startAbandonedCartCron } from '@/modules/cart/abandoned-cron';
@@ -121,6 +124,8 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/custom-fields', customFieldRoutes);
 app.use('/api/flags', featureFlagRoutes);
 app.use('/api/pages', cmsRoutes);
+app.use('/api/site', pageRoutes);
+app.use('/api/blog', blogRoutes);
 app.use('/api/fx', fxRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/admin', adminRouter);
@@ -135,6 +140,7 @@ async function start() {
   startWebhookDispatcher();
   startNotificationDispatcher();
   startAbandonedCartCron();
+  startScheduledBlogCron();
   app.listen(env.PORT, () => {
     logger.info('server.listening', {
       port: env.PORT,
