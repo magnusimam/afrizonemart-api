@@ -17,11 +17,12 @@ interface PublicCategory {
 
 /** Public list of categories — used by the storefront's "All Categories"
  *  dropdown, the homepage shelves, and any future menu surface. Returns
- *  a tree (top-level entries with their direct children nested), since
- *  navigation needs the structure but flat consumers can flatten via
- *  the included `parentId`. Product counts include only direct products
- *  (subcategory products aren't rolled up — keep counts truthful per
- *  node so empty subcategories can be hidden at render time). */
+ *  a tree (top-level entries with their direct children nested).
+ *
+ *  `productCount` is **rolled up** — a parent's count includes products
+ *  in every subcategory beneath it. Otherwise parents would always
+ *  show "0" because the leaf-wins assignment rule means products only
+ *  ever attach to subcategories, never their parents. */
 categoryRoutes.get(
   '/',
   asyncHandler(async (_req: Request, res: Response) => {
@@ -37,6 +38,20 @@ categoryRoutes.get(
       },
     });
 
+    // Roll up: parent count = direct + sum of children's direct counts.
+    // (Schema enforces 2-level max so we don't need recursion.)
+    const directById = new Map(items.map((c) => [c.id, c._count.products]));
+    const totalById = new Map<string, number>();
+    for (const c of items) totalById.set(c.id, directById.get(c.id) ?? 0);
+    for (const c of items) {
+      if (c.parentId && totalById.has(c.parentId)) {
+        totalById.set(
+          c.parentId,
+          (totalById.get(c.parentId) ?? 0) + (directById.get(c.id) ?? 0),
+        );
+      }
+    }
+
     const byId = new Map<string, PublicCategory>();
     for (const c of items) {
       byId.set(c.id, {
@@ -45,7 +60,7 @@ categoryRoutes.get(
         name: c.name,
         image: c.image,
         parentId: c.parentId,
-        productCount: c._count.products,
+        productCount: totalById.get(c.id) ?? 0,
         children: [],
       });
     }

@@ -3,14 +3,39 @@ import { HttpError } from '@/middleware/error-handler';
 import type { PartialCategoryBody, UpsertCategoryBody } from './admin.schema';
 
 export async function adminListCategories() {
-  // Returns the full flat list — admin UI is responsible for nesting
-  // children under their parents using `parentId`. Keeping it flat here
-  // means a single round-trip and a stable shape regardless of depth.
+  // Returns the full flat list with rolled-up product counts. Parent
+  // categories show direct products + every product in any
+  // subcategory beneath them — otherwise the admin sees "0" on
+  // every parent because (per the leaf-wins assignment rule)
+  // products only point at subcategories, never at parents.
   const items = await prisma.category.findMany({
     orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
     include: { _count: { select: { products: true } } },
   });
-  return { items };
+
+  // Sum each parent's direct count + each child's direct count.
+  const directById = new Map(items.map((c) => [c.id, c._count.products]));
+  const totalById = new Map<string, number>();
+  for (const c of items) {
+    totalById.set(c.id, directById.get(c.id) ?? 0);
+  }
+  for (const c of items) {
+    if (c.parentId && totalById.has(c.parentId)) {
+      totalById.set(c.parentId, (totalById.get(c.parentId) ?? 0) + (directById.get(c.id) ?? 0));
+    }
+  }
+
+  return {
+    items: items.map((c) => ({
+      ...c,
+      // _count.products keeps the direct count for code that wants it.
+      // _count.productsTotal is the rolled-up count we render in the UI.
+      _count: {
+        products: totalById.get(c.id) ?? 0,
+        productsDirect: directById.get(c.id) ?? 0,
+      },
+    })),
+  };
 }
 
 async function assertValidParent(parentId: string | null | undefined, selfId?: string) {
