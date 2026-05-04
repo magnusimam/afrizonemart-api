@@ -33,7 +33,6 @@ export type Capability =
   | 'staff.manage'
   // Marketing / CMS
   | 'cms-pages.write'
-  | 'site-pages.write'
   | 'blog.write'
   | 'placements.write'
   | 'feature-flags.write'
@@ -70,7 +69,6 @@ export const CAPABILITY_LABELS: Record<Capability, { domain: string; label: stri
   'staff.manage': { domain: 'People', label: 'Add / remove staff & change permissions' },
   // Marketing / CMS
   'cms-pages.write': { domain: 'Content', label: 'Edit legacy long-form CMS pages' },
-  'site-pages.write': { domain: 'Content', label: 'Edit landing pages in the site builder' },
   'blog.write': { domain: 'Content', label: 'Write & publish blog posts' },
   'placements.write': { domain: 'Content', label: 'Manage product placements' },
   'feature-flags.write': { domain: 'Content', label: 'Toggle feature flags' },

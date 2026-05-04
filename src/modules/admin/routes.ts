@@ -22,7 +22,6 @@ import { adminFeatureFlagRoutes } from '@/modules/feature-flags/admin.routes';
 import { adminBusinessRuleRoutes } from '@/modules/business-rules/admin.routes';
 import { adminCmsRoutes } from '@/modules/cms/admin.routes';
 import { adminPlacementsRoutes } from '@/modules/placements/admin.routes';
-import { adminPageRoutes } from '@/modules/pages/admin.routes';
 import { adminBlogRoutes } from '@/modules/blog/admin.routes';
 
 /**
@@ -61,6 +60,5 @@ adminRouter.use('/payment-gateways', adminPaymentRoutes);
 adminRouter.use('/feature-flags', adminFeatureFlagRoutes);
 adminRouter.use('/business-rules', adminBusinessRuleRoutes);
 adminRouter.use('/pages', adminCmsRoutes);
-adminRouter.use('/site-pages', adminPageRoutes);
 adminRouter.use('/blog', adminBlogRoutes);
 adminRouter.use('/placements', adminPlacementsRoutes);
