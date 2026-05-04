@@ -34,14 +34,20 @@ import { adminBlogRoutes } from '@/modules/blog/admin.routes';
  */
 export const adminRouter = Router();
 
-adminRouter.use(requireAuth, requireRole('ADMIN'));
+// ADMIN gets the full admin surface; STAFF gets in here too but the
+// frontend sidebar filters them down to their granted sections. The
+// staff-management endpoints are separately gated to ADMIN-only below.
+adminRouter.use(requireAuth, requireRole('ADMIN', 'STAFF'));
 
 adminRouter.use('/products', adminProductRoutes);
 adminRouter.use('/categories', adminCategoryRoutes);
 adminRouter.use('/reviews', adminReviewRoutes);
 adminRouter.use('/orders', adminOrderRoutes);
 adminRouter.use('/customers', adminCustomerRoutes);
-adminRouter.use('/staff', adminStaffRoutes);
+// Staff management — ADMIN-only inner gate. Even if a STAFF user
+// somehow has `staff.manage` listed, we don't trust per-user grants
+// for the high-blast-radius "create more staff" action.
+adminRouter.use('/staff', requireRole('ADMIN'), adminStaffRoutes);
 adminRouter.use('/coupons', adminCouponRoutes);
 adminRouter.use('/shipping', adminShippingRoutes);
 adminRouter.use('/settings', adminSettingsRoutes);

@@ -18,6 +18,10 @@ enum UserRole {
   CUSTOMER
   SELLER
   ADMIN
+  /// Per-user-permissions account. Effective access is whatever's in
+  /// `User.permissions[]`. Use STAFF for interns / contractors / scoped
+  /// employees who shouldn't have full ADMIN rights.
+  STAFF
 }
 
 model User {
@@ -34,6 +38,11 @@ model User {
   /// Picture URL from the OAuth provider — handy for avatars.
   avatarUrl        String?
   role             UserRole @default(CUSTOMER)
+  /// Per-user capabilities (only used when role=STAFF). When role=ADMIN
+  /// this is ignored — ADMIN always has every capability. CUSTOMER and
+  /// SELLER also ignore this. List values come from the capability
+  /// registry in src/lib/permissions.ts.
+  permissions      String[] @default([])
   // Refresh tokens are hashed before storage so a DB leak doesn't grant
   // session access. Null when the user has logged out everywhere.
   refreshTokenHash String?

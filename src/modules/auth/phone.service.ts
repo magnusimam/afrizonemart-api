@@ -141,11 +141,20 @@ async function issueTokens(user: User) {
 }
 
 function toPublic(user: User): PublicUser {
+  let permissions: string[] = [];
+  if (user.role === 'ADMIN') {
+    permissions = require('@/lib/permissions').ALL_CAPABILITIES;
+  } else if (user.role === 'STAFF') {
+    permissions = (user.permissions ?? []).filter(Boolean);
+  } else if (user.role === 'SELLER') {
+    permissions = ['orders.read', 'products.read', 'products.write', 'uploads.write'];
+  }
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     role: user.role,
+    permissions,
     createdAt: user.createdAt.toISOString(),
   };
 }

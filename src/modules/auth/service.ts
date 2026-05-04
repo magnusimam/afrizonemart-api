@@ -36,15 +36,36 @@ export interface PublicUser {
   email: string;
   name: string | null;
   role: string;
+  /// Effective capability set the user has right now. Computed once at
+  /// login time so the frontend can filter the sidebar without a
+  /// follow-up call. ADMIN gets every capability; STAFF gets whatever
+  /// the admin granted them via /admin/staff; SELLER/CUSTOMER get the
+  /// role defaults.
+  permissions: string[];
   createdAt: string;
 }
 
 function toPublic(user: User): PublicUser {
+  // Inline the resolution so we don't need to import the registry just
+  // for a few lines (and avoid any TS narrowing trouble with the
+  // `role as StaffRole` cast).
+  let permissions: string[] = [];
+  if (user.role === 'ADMIN') {
+    // Lazy import — safe inside a function body — to keep the auth
+    // module's static import graph small.
+    permissions = require('@/lib/permissions').ALL_CAPABILITIES;
+  } else if (user.role === 'STAFF') {
+    permissions = (user.permissions ?? []).filter(Boolean);
+  } else if (user.role === 'SELLER') {
+    permissions = ['orders.read', 'products.read', 'products.write', 'uploads.write'];
+  }
+
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     role: user.role,
+    permissions,
     createdAt: user.createdAt.toISOString(),
   };
 }

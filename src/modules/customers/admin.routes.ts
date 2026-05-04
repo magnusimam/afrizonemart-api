@@ -7,8 +7,11 @@ import {
 } from './admin.controller';
 import {
   adminCreateStaffHandler,
+  adminDeleteStaffHandler,
   adminGetPermissionsHandler,
+  adminGetStaffHandler,
   adminListStaffHandler,
+  adminUpdateStaffHandler,
 } from './admin.staff.controller';
 
 export const adminCustomerRoutes = Router();
@@ -21,4 +24,8 @@ export const adminStaffRoutes = Router();
 
 adminStaffRoutes.get('/', asyncHandler(adminListStaffHandler));
 adminStaffRoutes.post('/', asyncHandler(adminCreateStaffHandler));
+// `/permissions` BEFORE `/:id` so the literal route wins.
 adminStaffRoutes.get('/permissions', adminGetPermissionsHandler);
+adminStaffRoutes.get('/:id', asyncHandler(adminGetStaffHandler));
+adminStaffRoutes.patch('/:id', asyncHandler(adminUpdateStaffHandler));
+adminStaffRoutes.delete('/:id', asyncHandler(adminDeleteStaffHandler));
