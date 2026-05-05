@@ -14,6 +14,7 @@
     "prisma:studio": "prisma studio",
     "prisma:seed": "tsx prisma/seed.ts",
     "make-admin": "tsx scripts/make-admin.ts",
+    "make-supplier": "tsx scripts/make-supplier.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

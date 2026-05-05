@@ -22,6 +22,11 @@ enum UserRole {
   /// `User.permissions[]`. Use STAFF for interns / contractors / scoped
   /// employees who shouldn't have full ADMIN rights.
   STAFF
+  /// Vendor / brand / manufacturer going through the 10-stage supplier
+  /// onboarding pipeline. Each SUPPLIER user has a Supplier row holding
+  /// their company info and current stage. Distinct from SELLER (which
+  /// pre-dates the pipeline) — we may unify later.
+  SUPPLIER
 }
 
 model User {
@@ -68,9 +73,55 @@ model User {
   /// Image-update submissions this user has approved or rejected
   /// (admin/reviewer role).
   reviewedSubmissions     ProductImageSubmission[] @relation("InternSubmissionReviewer")
+  /// Supplier profile when role=SUPPLIER. One-to-one. Null for any
+  /// other role. Holds company info + current onboarding stage.
+  supplier                Supplier?
 
   @@index([email])
   @@index([phone])
+}
+
+// -----------------------------------------------------------------
+// Supplier domain — vendors going through the 10-stage onboarding
+// pipeline. Each Supplier row pairs 1:1 with a User where role=SUPPLIER.
+// Stage 1-3 collect company info, Stage 4 (PIQ) collects per-product
+// info, Stages 5-10 cover audit, partnership, activation, trade,
+// engagement. See SUPPLIER_PORTAL_TRACKER.md.
+// -----------------------------------------------------------------
+
+model Supplier {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Company / brand display name as it will appear in the marketplace.
+  companyName           String?
+  /// Lead contact at the company (often the same as User.name but kept
+  /// separate so the operating contact can change without touching
+  /// auth identity).
+  contactName           String?
+  /// E.164 phone for the supplier's primary contact.
+  contactPhone          String?
+  /// 2-letter ISO country code (operating HQ).
+  country               String?
+  /// Free-form address line — refined into structured fields in Stage 3
+  /// (Registration & Profiling) when we have the full spec.
+  address               String?
+  /// Where they are in the 10-stage onboarding journey. 1-indexed.
+  /// Auto-advances based on stage-specific completion checks (e.g.
+  /// Stage 4 advances when minimumPIQsRequired PIQs are APPROVED).
+  currentStage          Int      @default(1)
+  /// Total stages in the pipeline. Documented constant — we set it
+  /// here so any code reading from a Supplier row gets the right
+  /// number without importing a constant file.
+  maxStage              Int      @default(10)
+  /// Stage 4 (PIQ) completion threshold. Default 1 — supplier needs
+  /// at least 1 APPROVED PIQ before advancing to Stage 5. Configurable
+  /// per supplier so AZM can require more from larger vendors.
+  minimumPIQsRequired   Int      @default(1)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([currentStage])
 }
 
 // -----------------------------------------------------------------
