@@ -11,6 +11,7 @@ import {
   adminGetPermissionsHandler,
   adminGetStaffHandler,
   adminListStaffHandler,
+  adminResendInviteHandler,
   adminUpdateStaffHandler,
 } from './admin.staff.controller';
 
@@ -29,3 +30,4 @@ adminStaffRoutes.get('/permissions', adminGetPermissionsHandler);
 adminStaffRoutes.get('/:id', asyncHandler(adminGetStaffHandler));
 adminStaffRoutes.patch('/:id', asyncHandler(adminUpdateStaffHandler));
 adminStaffRoutes.delete('/:id', asyncHandler(adminDeleteStaffHandler));
+adminStaffRoutes.post('/:id/resend-invite', asyncHandler(adminResendInviteHandler));
