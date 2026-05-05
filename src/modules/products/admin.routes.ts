@@ -10,6 +10,10 @@ import {
   adminListProductsHandler,
   adminUpdateProductHandler,
 } from './admin.controller';
+import {
+  adminListBrandsHandler,
+  adminSetBrandLogoHandler,
+} from './admin.brands.controller';
 
 export const adminProductRoutes = Router();
 
@@ -21,3 +25,11 @@ adminProductRoutes.get('/bulk-template', adminBulkTemplateHandler);
 adminProductRoutes.get('/:id', asyncHandler(adminGetProductHandler));
 adminProductRoutes.patch('/:id', asyncHandler(adminUpdateProductHandler));
 adminProductRoutes.delete('/:id', asyncHandler(adminDeleteProductHandler));
+
+/// Brand-scoped admin actions. Brands aren't a first-class entity — they
+/// live as a string on Product — but admins need to manage logo coverage
+/// across many products at once. Mounted separately at /api/admin/brands.
+export const adminBrandRoutes = Router();
+
+adminBrandRoutes.get('/', asyncHandler(adminListBrandsHandler));
+adminBrandRoutes.post('/set-logo', asyncHandler(adminSetBrandLogoHandler));
