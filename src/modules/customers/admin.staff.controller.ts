@@ -10,6 +10,7 @@ import {
   getPermissionsMatrix,
   getStaff,
   listStaff,
+  resetAndResendInvite,
   updateStaff,
 } from './admin.staff.service';
 
@@ -40,6 +41,12 @@ export async function adminDeleteStaffHandler(req: Request, res: Response): Prom
   if (!id) throw HttpError.badRequest('Missing staff id');
   await deleteStaff(id);
   res.status(204).end();
+}
+
+export async function adminResendInviteHandler(req: Request, res: Response): Promise<void> {
+  const id = req.params.id;
+  if (!id) throw HttpError.badRequest('Missing staff id');
+  res.json(await resetAndResendInvite(id));
 }
 
 export function adminGetPermissionsHandler(_req: Request, res: Response): void {

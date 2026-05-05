@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import { prisma } from '@/infra/prisma';
 import { logger } from '@/infra/logger';
 import { env } from '@/config/env';
@@ -210,6 +211,60 @@ export async function updateStaff(id: string, body: UpdateStaffBody) {
       effectiveCapabilities(updated.role as StaffRole, updated.permissions),
     ),
   };
+}
+
+/**
+ * Reset a staff member's password to a freshly-generated strong random
+ * value and re-send the invite email with the new credentials. Used when
+ * the original invite is lost or never arrived.
+ *
+ * Resets unconditionally — the old password stops working immediately.
+ * The plain password is only ever held in memory for the duration of
+ * this function (just long enough to bcrypt it + put it in the email);
+ * we never log it.
+ */
+export async function resetAndResendInvite(id: string): Promise<{ ok: true }> {
+  const existing = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true, email: true, name: true, role: true, jobTitle: true },
+  });
+  if (!existing) throw HttpError.notFound('Staff member not found');
+  if (!['SELLER', 'ADMIN', 'STAFF'].includes(existing.role)) {
+    throw HttpError.badRequest(
+      'User exists but is not a staff member — only SELLER/STAFF/ADMIN accounts get invites.',
+    );
+  }
+
+  const plainPassword = generateInvitePassword();
+  const passwordHash = await bcrypt.hash(plainPassword, BCRYPT_ROUNDS);
+
+  await prisma.user.update({
+    where: { id },
+    data: { passwordHash },
+  });
+
+  // Synchronous send (not fire-and-forget) so the admin sees an error
+  // toast if the email failed and can try again.
+  await sendStaffInvite({
+    email: existing.email,
+    name: existing.name,
+    role: existing.role as 'SELLER' | 'ADMIN' | 'STAFF',
+    jobTitle: existing.jobTitle ?? null,
+    plainPassword,
+  });
+
+  logger.info('staff.invite.resent', { userId: id });
+  return { ok: true };
+}
+
+/**
+ * Generate a 16-character base64-url-safe password. ~94 bits of
+ * entropy — strong enough to share via email and not feel weak when
+ * the recipient looks at it. They can change it later if we add a
+ * self-service reset flow.
+ */
+function generateInvitePassword(): string {
+  return randomBytes(12).toString('base64url');
 }
 
 export async function deleteStaff(id: string) {
