@@ -79,6 +79,8 @@ export async function getInternQueue(internId: string) {
           backImageUrl: true,
           sideImageUrl: true,
           additionalImages: true,
+          brandImageUrl: true,
+          brandImageAlt: true,
           reviewedAt: true,
           createdAt: true,
         },
@@ -190,6 +192,8 @@ export async function submitImages(
       backImageUrl: body.backImageUrl,
       sideImageUrl: body.sideImageUrl,
       additionalImages: body.additionalImages,
+      brandImageUrl: body.brandImageUrl,
+      brandImageAlt: body.brandImageAlt ?? null,
       status: 'PENDING_REVIEW',
       payRate,
     },
@@ -487,6 +491,8 @@ export async function reviewSubmission(
       backImageUrl: true,
       sideImageUrl: true,
       additionalImages: true,
+      brandImageUrl: true,
+      brandImageAlt: true,
     },
   });
   if (!full) throw HttpError.notFound('Submission disappeared mid-review');
@@ -509,7 +515,17 @@ export async function reviewSubmission(
     }),
     prisma.product.update({
       where: { id: sub.productId },
-      data: { images: newImages },
+      data: {
+        images: newImages,
+        // Brand fields nullable on submission for older rows; only
+        // overwrite when this submission supplied them.
+        ...(full.brandImageUrl != null
+          ? {
+              brandImageUrl: full.brandImageUrl,
+              brandImageAlt: full.brandImageAlt ?? null,
+            }
+          : {}),
+      },
     }),
   ]);
   return updated;
