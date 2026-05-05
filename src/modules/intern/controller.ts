@@ -15,6 +15,7 @@ import {
   getDefaultPayRate,
   getInternProgress,
   getInternQueue,
+  getInternSelfStats,
   listSubmissionsForReview,
   reassign,
   reviewSubmission,
@@ -32,6 +33,12 @@ export async function getMyQueueHandler(req: Request, res: Response): Promise<vo
   const userId = (req as AuthedReq).user?.id;
   if (!userId) throw HttpError.unauthorized();
   res.json(await getInternQueue(userId));
+}
+
+export async function getMyStatsHandler(req: Request, res: Response): Promise<void> {
+  const userId = (req as AuthedReq).user?.id;
+  if (!userId) throw HttpError.unauthorized();
+  res.json(await getInternSelfStats(userId));
 }
 
 export async function claimFromPoolHandler(req: Request, res: Response): Promise<void> {
