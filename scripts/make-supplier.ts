@@ -45,7 +45,7 @@ async function main() {
         userId: user.id,
         companyName: companyArg ?? null,
         currentStage: 1,
-        maxStage: 10,
+        maxStage: 9,
         minimumPIQsRequired: 1,
       },
     });

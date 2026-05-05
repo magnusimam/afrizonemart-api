@@ -136,7 +136,7 @@ export async function registerSupplier(
           contactPhone: body.contactPhone ?? null,
           country: body.country ? body.country.toUpperCase() : null,
           currentStage: 1,
-          maxStage: 10,
+          maxStage: 9,
           minimumPIQsRequired: 1,
         },
       },

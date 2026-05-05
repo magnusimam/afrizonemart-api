@@ -106,16 +106,18 @@ model Supplier {
   /// Free-form address line — refined into structured fields in Stage 3
   /// (Registration & Profiling) when we have the full spec.
   address               String?
-  /// Where they are in the 10-stage onboarding journey. 1-indexed.
-  /// Auto-advances based on stage-specific completion checks (e.g.
-  /// Stage 4 advances when minimumPIQsRequired PIQs are APPROVED).
+  /// Where they are in the 9-stage onboarding journey. 1-indexed,
+  /// starting at EoI (Expression of Interest). Auto-advances based on
+  /// stage-specific completion checks (e.g. Stage 3 advances when
+  /// minimumPIQsRequired PIQs are APPROVED).
   currentStage          Int      @default(1)
-  /// Total stages in the pipeline. Documented constant — we set it
-  /// here so any code reading from a Supplier row gets the right
-  /// number without importing a constant file.
-  maxStage              Int      @default(10)
-  /// Stage 4 (PIQ) completion threshold. Default 1 — supplier needs
-  /// at least 1 APPROVED PIQ before advancing to Stage 5. Configurable
+  /// Total stages in the pipeline. Originally 10; trimmed to 9 when
+  /// "Supplier Discovery & Initial Contact" was removed from the
+  /// supplier-facing journey (it stays as an internal AZM-side concept
+  /// — admins find suppliers, but suppliers don't see it as a step).
+  maxStage              Int      @default(9)
+  /// Stage 3 (PIQ) completion threshold. Default 1 — supplier needs
+  /// at least 1 APPROVED PIQ before advancing to Stage 4. Configurable
   /// per supplier so AZM can require more from larger vendors.
   minimumPIQsRequired   Int      @default(1)
   createdAt             DateTime @default(now())
