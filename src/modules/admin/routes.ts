@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '@/middleware/auth';
 import { requireRole } from '@/middleware/require-role';
-import { adminProductRoutes } from '@/modules/products/admin.routes';
+import { adminBrandRoutes, adminProductRoutes } from '@/modules/products/admin.routes';
 import { adminCategoryRoutes } from '@/modules/categories/admin.routes';
 import { adminReviewRoutes } from '@/modules/reviews/admin.routes';
 import { adminOrderRoutes } from '@/modules/orders/admin.routes';
@@ -41,6 +41,7 @@ export const adminRouter = Router();
 adminRouter.use(requireAuth, requireRole('ADMIN', 'STAFF'));
 
 adminRouter.use('/products', adminProductRoutes);
+adminRouter.use('/brands', adminBrandRoutes);
 adminRouter.use('/categories', adminCategoryRoutes);
 adminRouter.use('/reviews', adminReviewRoutes);
 adminRouter.use('/orders', adminOrderRoutes);

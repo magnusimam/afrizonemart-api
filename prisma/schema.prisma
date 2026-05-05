@@ -112,6 +112,13 @@ model Product {
   reviewCount      Int      @default(0)
   // Image URLs as a JSON array — flexible without a side table for now.
   images           String[]
+  /// Brand / company logo URL. Per-product (not per-brand) for now —
+  /// when 50 products from the same brand all set this, that's a hint
+  /// to extract a proper Brand table. Captured by the intern image
+  /// workflow alongside front/back/side; surfaced in the storefront's
+  /// "About the brand" section on the product page.
+  brandImageUrl    String?
+  brandImageAlt    String?
   // Schema-Driven attributes (Principle #4): bundles, features, specs,
   // variants, aboutTitle/body/image — anything that varies by product
   // type without needing a column per attribute.
@@ -1066,6 +1073,11 @@ model ProductImageSubmission {
   backImageUrl    String
   sideImageUrl    String
   additionalImages String[]             @default([])
+  /// Brand / company logo. Required at the schema level (see
+  /// submitImagesBodySchema) so every approved submission gives the
+  /// product page's "About the brand" section an image to render.
+  brandImageUrl   String?
+  brandImageAlt   String?
   /// Filled when status flips to REJECTED. Surfaced to the intern in
   /// their queue so they know what to fix.
   rejectionReason String?

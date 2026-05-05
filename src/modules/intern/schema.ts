@@ -1,12 +1,19 @@
 import { z } from 'zod';
 
 const httpsUrl = z.string().url();
+const altText = z.string().trim().max(200).nullable().optional();
 
 export const submitImagesBodySchema = z.object({
   frontImageUrl: httpsUrl,
   backImageUrl: httpsUrl,
   sideImageUrl: httpsUrl,
-  /// Optional extra images beyond the required three.
+  /// Brand / company logo. Required by the schema so every approved
+  /// submission gives the storefront's "About the brand" section
+  /// something to render. Loosen to optional later if it turns out
+  /// some categories don't have an obvious brand.
+  brandImageUrl: httpsUrl,
+  brandImageAlt: altText,
+  /// Optional extra images beyond the required three (+ brand).
   additionalImages: z.array(httpsUrl).max(8).default([]),
 });
 export type SubmitImagesBody = z.infer<typeof submitImagesBodySchema>;
