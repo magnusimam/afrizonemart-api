@@ -26,6 +26,7 @@ export async function listStaff() {
       email: true,
       name: true,
       role: true,
+      jobTitle: true,
       permissions: true,
       createdAt: true,
     },
@@ -50,6 +51,7 @@ export async function getStaff(id: string) {
       email: true,
       name: true,
       role: true,
+      jobTitle: true,
       permissions: true,
       createdAt: true,
     },
@@ -84,6 +86,7 @@ export async function createStaff(body: CreateStaffBody) {
       passwordHash,
       name: body.name,
       role: body.role,
+      jobTitle: body.jobTitle ?? null,
       // STAFF role uses per-user permissions; SELLER/ADMIN ignore them
       // (their effective set comes from ROLE_CAPABILITIES).
       permissions: body.role === 'STAFF' ? body.permissions ?? [] : [],
@@ -93,6 +96,7 @@ export async function createStaff(body: CreateStaffBody) {
       email: true,
       name: true,
       role: true,
+      jobTitle: true,
       permissions: true,
       createdAt: true,
     },
@@ -104,6 +108,7 @@ export async function createStaff(body: CreateStaffBody) {
     email: created.email,
     name: created.name,
     role: body.role,
+    jobTitle: body.jobTitle ?? null,
     plainPassword: body.password,
   }).catch((error) => {
     logger.error('staff.invite.failed', {
@@ -124,6 +129,7 @@ async function sendStaffInvite(args: {
   email: string;
   name: string | null;
   role: 'SELLER' | 'ADMIN' | 'STAFF';
+  jobTitle: string | null;
   plainPassword: string;
 }) {
   const loginUrl = `${env.WEB_URL}/admin/login`;
@@ -132,13 +138,14 @@ async function sendStaffInvite(args: {
     recipientEmail: args.email,
     initialPassword: args.plainPassword,
     role: args.role.toLowerCase(),
+    jobTitle: args.jobTitle,
     loginUrl,
   };
   await sendEmail({
     type: 'staff.invited',
     to: args.email,
     subject: "You've been added to the Afrizonemart admin team",
-    context: { role: args.role, loginUrl },
+    context: { role: args.role, jobTitle: args.jobTitle, loginUrl },
     template: StaffInviteEmail(props),
   });
 }
@@ -165,9 +172,11 @@ export async function updateStaff(id: string, body: UpdateStaffBody) {
     role?: 'SELLER' | 'ADMIN' | 'STAFF';
     permissions?: string[];
     passwordHash?: string;
+    jobTitle?: string | null;
   } = {};
   if (body.name !== undefined) data.name = body.name;
   if (body.role !== undefined) data.role = body.role;
+  if (body.jobTitle !== undefined) data.jobTitle = body.jobTitle;
   if (body.permissions !== undefined) {
     // Only meaningful when the resulting role is STAFF; for SELLER/ADMIN
     // we silently store [] so a future role flip starts clean.
@@ -190,6 +199,7 @@ export async function updateStaff(id: string, body: UpdateStaffBody) {
       email: true,
       name: true,
       role: true,
+      jobTitle: true,
       permissions: true,
       createdAt: true,
     },
