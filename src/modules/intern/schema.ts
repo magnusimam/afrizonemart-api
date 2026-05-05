@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
 const httpsUrl = z.string().url();
+/// Alt text — cap at a sensible length. Empty/null is fine; we don't
+/// require alt text (yet) so old submissions/UIs don't break.
+const altText = z.string().trim().max(200).nullable().optional();
 
 export const submitImagesBodySchema = z.object({
   frontImageUrl: httpsUrl,
@@ -8,6 +11,13 @@ export const submitImagesBodySchema = z.object({
   sideImageUrl: httpsUrl,
   /// Optional extra images beyond the required three.
   additionalImages: z.array(httpsUrl).max(8).default([]),
+  /// SEO/accessibility alt text per image. Optional but encouraged in
+  /// the UI. additionalImageAlts[i] describes additionalImages[i] —
+  /// length should match but extras silently truncate to images length.
+  frontImageAlt: altText,
+  backImageAlt: altText,
+  sideImageAlt: altText,
+  additionalImageAlts: z.array(z.string().trim().max(200)).max(8).default([]),
 });
 export type SubmitImagesBody = z.infer<typeof submitImagesBodySchema>;
 

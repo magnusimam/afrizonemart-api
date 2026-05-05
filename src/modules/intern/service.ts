@@ -79,6 +79,10 @@ export async function getInternQueue(internId: string) {
           backImageUrl: true,
           sideImageUrl: true,
           additionalImages: true,
+          frontImageAlt: true,
+          backImageAlt: true,
+          sideImageAlt: true,
+          additionalImageAlts: true,
           reviewedAt: true,
           createdAt: true,
         },
@@ -190,6 +194,10 @@ export async function submitImages(
       backImageUrl: body.backImageUrl,
       sideImageUrl: body.sideImageUrl,
       additionalImages: body.additionalImages,
+      frontImageAlt: body.frontImageAlt ?? null,
+      backImageAlt: body.backImageAlt ?? null,
+      sideImageAlt: body.sideImageAlt ?? null,
+      additionalImageAlts: body.additionalImageAlts ?? [],
       status: 'PENDING_REVIEW',
       payRate,
     },
@@ -487,6 +495,10 @@ export async function reviewSubmission(
       backImageUrl: true,
       sideImageUrl: true,
       additionalImages: true,
+      frontImageAlt: true,
+      backImageAlt: true,
+      sideImageAlt: true,
+      additionalImageAlts: true,
     },
   });
   if (!full) throw HttpError.notFound('Submission disappeared mid-review');
@@ -496,6 +508,17 @@ export async function reviewSubmission(
     full.backImageUrl,
     full.sideImageUrl,
     ...full.additionalImages,
+  ];
+  // Build the alt array in the same order; pad missing extras with
+  // empty strings so imageAlts stays index-aligned with images.
+  const padded = full.additionalImages.map(
+    (_, i) => full.additionalImageAlts[i] ?? '',
+  );
+  const newImageAlts = [
+    full.frontImageAlt ?? '',
+    full.backImageAlt ?? '',
+    full.sideImageAlt ?? '',
+    ...padded,
   ];
 
   const [updated] = await prisma.$transaction([
@@ -509,7 +532,7 @@ export async function reviewSubmission(
     }),
     prisma.product.update({
       where: { id: sub.productId },
-      data: { images: newImages },
+      data: { images: newImages, imageAlts: newImageAlts },
     }),
   ]);
   return updated;

@@ -112,6 +112,11 @@ model Product {
   reviewCount      Int      @default(0)
   // Image URLs as a JSON array — flexible without a side table for now.
   images           String[]
+  // Parallel array of alt text — imageAlts[i] describes images[i]. Empty
+  // strings are normal (no alt set). Used for accessibility and SEO; the
+  // storefront feeds these into <img alt> attributes. Length should
+  // mirror images[] but legacy products may have empty/shorter arrays.
+  imageAlts        String[] @default([])
   // Schema-Driven attributes (Principle #4): bundles, features, specs,
   // variants, aboutTitle/body/image — anything that varies by product
   // type without needing a column per attribute.
@@ -1066,6 +1071,15 @@ model ProductImageSubmission {
   backImageUrl    String
   sideImageUrl    String
   additionalImages String[]             @default([])
+  /// Optional SEO/accessibility alt text per image. The intern is
+  /// nudged to fill these in the queue UI (pre-populated suggestions
+  /// from the product name + view label). When the submission is
+  /// approved, alts are written onto Product.imageAlts in the same
+  /// order as Product.images.
+  frontImageAlt   String?
+  backImageAlt    String?
+  sideImageAlt    String?
+  additionalImageAlts String[]          @default([])
   /// Filled when status flips to REJECTED. Surfaced to the intern in
   /// their queue so they know what to fix.
   rejectionReason String?
