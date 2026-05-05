@@ -15,12 +15,14 @@ import {
   phoneVerifyHandler,
   refreshHandler,
   registerHandler,
+  registerSupplierHandler,
   resetPasswordHandler,
 } from './controller';
 
 export const authRoutes = Router();
 
 authRoutes.post('/register', authMutationLimiter, asyncHandler(registerHandler));
+authRoutes.post('/supplier/register', authMutationLimiter, asyncHandler(registerSupplierHandler));
 authRoutes.post('/login', authStrictLimiter, asyncHandler(loginHandler));
 authRoutes.post('/refresh', asyncHandler(refreshHandler));
 authRoutes.post('/logout', requireAuth, asyncHandler(logoutHandler));

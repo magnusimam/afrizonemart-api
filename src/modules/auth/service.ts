@@ -3,8 +3,8 @@ import bcrypt from 'bcryptjs';
 import type { User } from '@prisma/client';
 import { env } from '@/config/env';
 import { HttpError } from '@/middleware/error-handler';
-import { eventBus } from '@/infra/eventBus';
 import { prisma } from '@/infra/prisma';
+import { eventBus } from '@/infra/eventBus';
 import {
   signAccessToken,
   signRefreshToken,
@@ -98,6 +98,49 @@ export async function register(body: RegisterBody): Promise<AuthResult> {
     email: body.email,
     passwordHash,
     name: body.name,
+  });
+
+  await eventBus.emit('user.registered', {
+    userId: user.id,
+    email: user.email,
+  });
+
+  return issueTokens(user);
+}
+
+/**
+ * Supplier-portal sign-up. Creates the User with role=SUPPLIER and the
+ * matching Supplier row at currentStage=1, then returns auth tokens
+ * (same shape as customer register) so the storefront can sign them
+ * straight in and route to /supplier/dashboard.
+ */
+export async function registerSupplier(
+  body: import('./auth.schema').SupplierRegisterBody,
+): Promise<AuthResult> {
+  const existing = await findUserByEmail(body.email);
+  if (existing) {
+    throw HttpError.conflict('An account with this email already exists');
+  }
+
+  const passwordHash = await bcrypt.hash(body.password, BCRYPT_ROUNDS);
+  const user = await prisma.user.create({
+    data: {
+      email: body.email,
+      passwordHash,
+      name: body.name,
+      role: 'SUPPLIER',
+      supplier: {
+        create: {
+          companyName: body.companyName,
+          contactName: body.name,
+          contactPhone: body.contactPhone ?? null,
+          country: body.country ? body.country.toUpperCase() : null,
+          currentStage: 1,
+          maxStage: 9,
+          minimumPIQsRequired: 1,
+        },
+      },
+    },
   });
 
   await eventBus.emit('user.registered', {

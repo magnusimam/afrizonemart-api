@@ -8,6 +8,7 @@ import {
   loginBodySchema,
   registerBodySchema,
   resetPasswordBodySchema,
+  supplierRegisterBodySchema,
 } from './auth.schema';
 import {
   getMe,
@@ -15,6 +16,7 @@ import {
   logout,
   refresh,
   register,
+  registerSupplier,
   requestPasswordReset,
   resetPassword,
 } from './service';
@@ -61,6 +63,16 @@ export async function registerHandler(
 ): Promise<void> {
   const body = registerBodySchema.parse(req.body);
   const result = await register(body);
+  setRefreshCookie(res, result.refreshToken);
+  res.status(201).json(buildResponse(result));
+}
+
+export async function registerSupplierHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const body = supplierRegisterBodySchema.parse(req.body);
+  const result = await registerSupplier(body);
   setRefreshCookie(res, result.refreshToken);
   res.status(201).json(buildResponse(result));
 }
