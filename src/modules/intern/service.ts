@@ -201,6 +201,53 @@ export async function submitImages(
   });
 }
 
+/**
+ * Self-stats for an intern's own dashboard. Returns the same status
+ * counts as getInternQueue plus money already earned (sum of approved
+ * submissions' snapshot pay) and money in flight (sum of pending).
+ *
+ * Earnings use each submission's locked-in payRate, not the current
+ * default — so a rate change later does not retroactively adjust
+ * already-banked or already-submitted work.
+ */
+export async function getInternSelfStats(internId: string) {
+  const [assignedCount, submissions, currentRate] = await Promise.all([
+    prisma.product.count({ where: { assignedInternId: internId } }),
+    prisma.productImageSubmission.findMany({
+      where: { internId },
+      select: { status: true, payRate: true },
+    }),
+    getDefaultPayRate(),
+  ]);
+
+  let approved = 0;
+  let pending = 0;
+  let rejected = 0;
+  let earnedNgn = 0;
+  let pendingNgn = 0;
+  for (const s of submissions) {
+    if (s.status === 'APPROVED') {
+      approved += 1;
+      earnedNgn += s.payRate;
+    } else if (s.status === 'PENDING_REVIEW') {
+      pending += 1;
+      pendingNgn += s.payRate;
+    } else if (s.status === 'REJECTED') {
+      rejected += 1;
+    }
+  }
+  const todo = Math.max(0, assignedCount - approved - pending - rejected);
+
+  return {
+    stats: { todo, pending, approved, rejected, assigned: assignedCount },
+    earnings: {
+      currentRateNgn: currentRate,
+      earnedNgn,
+      pendingNgn,
+    },
+  };
+}
+
 // =============================================================
 // ADMIN-FACING HELPERS
 // =============================================================

@@ -6,6 +6,7 @@ import { requireCapability } from '@/middleware/require-capability';
 import {
   claimFromPoolHandler,
   getMyQueueHandler,
+  getMyStatsHandler,
   submitImagesHandler,
 } from './controller';
 
@@ -17,6 +18,7 @@ export const internRoutes = Router();
 
 internRoutes.use(requireAuth, requireRole('STAFF', 'ADMIN'), requireCapability('products.image-only'));
 
+internRoutes.get('/me', asyncHandler(getMyStatsHandler));
 internRoutes.get('/queue', asyncHandler(getMyQueueHandler));
 internRoutes.post('/claim', asyncHandler(claimFromPoolHandler));
 internRoutes.post('/products/:id/submit', asyncHandler(submitImagesHandler));
