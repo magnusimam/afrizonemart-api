@@ -1,5 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/infra/prisma';
+import { logger } from '@/infra/logger';
+import { env } from '@/config/env';
 import { HttpError } from '@/middleware/error-handler';
 import {
   CAPABILITY_LABELS,
@@ -9,6 +11,8 @@ import {
   type Capability,
   type StaffRole,
 } from '@/lib/permissions';
+import { sendEmail } from '@/modules/notifications/service';
+import { StaffInviteEmail } from '@/modules/notifications/templates/StaffInvite';
 import type { CreateStaffBody, UpdateStaffBody } from './admin.staff.schema';
 
 const BCRYPT_ROUNDS = 12;
@@ -93,12 +97,50 @@ export async function createStaff(body: CreateStaffBody) {
       createdAt: true,
     },
   });
+
+  // Fire-and-forget invite. Email failure must not roll back the user
+  // creation — the admin can still share credentials manually.
+  void sendStaffInvite({
+    email: created.email,
+    name: created.name,
+    role: body.role,
+    plainPassword: body.password,
+  }).catch((error) => {
+    logger.error('staff.invite.failed', {
+      userId: created.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+
   return {
     ...created,
     effectivePermissions: Array.from(
       effectiveCapabilities(created.role as StaffRole, created.permissions),
     ),
   };
+}
+
+async function sendStaffInvite(args: {
+  email: string;
+  name: string | null;
+  role: 'SELLER' | 'ADMIN' | 'STAFF';
+  plainPassword: string;
+}) {
+  const loginUrl = `${env.WEB_URL}/admin/login`;
+  const props = {
+    recipientName: args.name?.split(' ')[0] ?? 'there',
+    recipientEmail: args.email,
+    initialPassword: args.plainPassword,
+    role: args.role.toLowerCase(),
+    loginUrl,
+  };
+  await sendEmail({
+    type: 'staff.invited',
+    to: args.email,
+    subject: "You've been added to the Afrizonemart admin team",
+    context: { role: args.role, loginUrl },
+    template: StaffInviteEmail(props),
+  });
 }
 
 export async function updateStaff(id: string, body: UpdateStaffBody) {
