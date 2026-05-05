@@ -2,7 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import multer, { MulterError, type FileFilterCallback } from 'multer';
 import { asyncHandler } from '@/middleware/async-handler';
 import { requireAuth } from '@/middleware/auth';
-import { requireRole } from '@/middleware/require-role';
+import { requireCapability } from '@/middleware/require-capability';
 import { env } from '@/config/env';
 import { HttpError } from '@/middleware/error-handler';
 import { uploadHandler } from './controller';
@@ -40,8 +40,10 @@ function translateMulterError(handler: ReturnType<typeof upload.single>) {
 
 export const uploadRoutes = Router();
 
-// Auth required for any upload. v1 gate is ADMIN only; loosen to
-// SELLER (and CUSTOMER for review attachments) when those use cases land.
-uploadRoutes.use(requireAuth, requireRole('ADMIN'));
+// Auth + uploads.write capability. ADMIN passes by default. SELLER
+// gets it via role defaults. STAFF gets it via either an explicit
+// permission grant or the implicit one tied to products.image-only
+// (the intern image-update workflow).
+uploadRoutes.use(requireAuth, requireCapability('uploads.write'));
 
 uploadRoutes.post('/', translateMulterError(upload.single('file')), asyncHandler(uploadHandler));

@@ -127,7 +127,12 @@ export function effectiveCapabilities(
     const grants = (userPermissions ?? []).filter((p): p is Capability =>
       Object.prototype.hasOwnProperty.call(CAPABILITY_LABELS, p),
     );
-    return new Set(grants);
+    const set = new Set<Capability>(grants);
+    // Implicit grant: anyone with products.image-only needs to upload
+    // files to fulfill that role. Saving the admin from having to tick
+    // both boxes — without it, the intern queue is dead-on-arrival.
+    if (set.has('products.image-only')) set.add('uploads.write');
+    return set;
   }
   return new Set(ROLE_CAPABILITIES[role]);
 }
