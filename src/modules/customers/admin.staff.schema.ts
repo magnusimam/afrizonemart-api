@@ -7,6 +7,10 @@ export const createStaffBodySchema = z
     name: z.string().trim().min(1).max(120).optional(),
     role: z.enum(['SELLER', 'ADMIN', 'STAFF']),
     password: z.string().min(8).max(128),
+    /// Free-form job title — what the admin types in the dialog
+    /// ("Intern", "Customer Support Lead", etc.). Cosmetic; does NOT
+    /// grant access. Permissions still drive what they can do.
+    jobTitle: z.string().trim().min(1).max(80).optional(),
     /// Used when role=STAFF — the per-user capability grants. Ignored
     /// for SELLER and ADMIN (those use their role-default capabilities).
     permissions: z.array(z.enum(ALL_CAPABILITIES as [string, ...string[]])).optional(),
@@ -25,6 +29,8 @@ export const updateStaffBodySchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   role: z.enum(['SELLER', 'ADMIN', 'STAFF']).optional(),
   permissions: z.array(z.enum(ALL_CAPABILITIES as [string, ...string[]])).optional(),
+  /// Pass null to clear the title; pass a string to update; omit to leave alone.
+  jobTitle: z.string().trim().min(1).max(80).nullable().optional(),
   /// Optional password reset by the admin. Setting null/undefined leaves
   /// the existing hash in place.
   password: z.string().min(8).max(128).optional(),

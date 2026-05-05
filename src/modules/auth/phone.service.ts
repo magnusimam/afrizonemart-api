@@ -154,6 +154,7 @@ function toPublic(user: User): PublicUser {
     email: user.email,
     name: user.name,
     role: user.role,
+    jobTitle: user.jobTitle ?? null,
     permissions,
     createdAt: user.createdAt.toISOString(),
   };

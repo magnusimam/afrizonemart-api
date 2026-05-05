@@ -36,6 +36,7 @@ export interface PublicUser {
   email: string;
   name: string | null;
   role: string;
+  jobTitle: string | null;
   /// Effective capability set the user has right now. Computed once at
   /// login time so the frontend can filter the sidebar without a
   /// follow-up call. ADMIN gets every capability; STAFF gets whatever
@@ -65,6 +66,7 @@ function toPublic(user: User): PublicUser {
     email: user.email,
     name: user.name,
     role: user.role,
+    jobTitle: user.jobTitle ?? null,
     permissions,
     createdAt: user.createdAt.toISOString(),
   };

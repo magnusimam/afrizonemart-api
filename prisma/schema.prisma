@@ -43,6 +43,11 @@ model User {
   /// SELLER also ignore this. List values come from the capability
   /// registry in src/lib/permissions.ts.
   permissions      String[] @default([])
+  /// Free-form job title for staff (e.g. "Intern", "Customer Support",
+  /// "Content Editor"). Cosmetic only — does NOT grant access; the
+  /// permissions array drives what they can do. Surfaced in the admin
+  /// staff list and on the staff member's dashboard greeting.
+  jobTitle         String?
   // Refresh tokens are hashed before storage so a DB leak doesn't grant
   // session access. Null when the user has logged out everywhere.
   refreshTokenHash String?

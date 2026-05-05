@@ -14,16 +14,20 @@ export interface StaffInviteProps {
   recipientEmail: string;
   initialPassword: string;
   role: string;
+  jobTitle: string | null;
   loginUrl: string;
 }
 
 export function StaffInviteEmail(props: StaffInviteProps) {
+  // Prefer the human-readable job title in the welcome line; fall back
+  // to the security role when the admin didn't set a title.
+  const positionLabel = props.jobTitle?.trim() || props.role;
   return (
     <EmailLayout preview="You've been added to the Afrizonemart admin team.">
       <Heading>Welcome to the team, {props.recipientName}.</Heading>
       <Paragraph>
-        You've been added as a <strong>{props.role}</strong> on the Afrizonemart
-        admin console. Use the credentials below to sign in.
+        You've been added as a <strong>{positionLabel}</strong> on the
+        Afrizonemart admin console. Use the credentials below to sign in.
       </Paragraph>
 
       <SubHeading>Your sign-in details</SubHeading>
