@@ -188,9 +188,10 @@ export async function submitImages(
     data: {
       productId,
       internId,
-      frontImageUrl: body.frontImageUrl,
-      backImageUrl: body.backImageUrl,
-      sideImageUrl: body.sideImageUrl,
+      // Empty strings normalise to null so the column reads consistently.
+      frontImageUrl: body.frontImageUrl || null,
+      backImageUrl: body.backImageUrl || null,
+      sideImageUrl: body.sideImageUrl || null,
       additionalImages: body.additionalImages,
       brandImageUrl: body.brandImageUrl,
       brandImageAlt: body.brandImageAlt ?? null,
@@ -497,12 +498,13 @@ export async function reviewSubmission(
   });
   if (!full) throw HttpError.notFound('Submission disappeared mid-review');
 
+  // Filter out null/empty slots — front/back/side are now optional.
   const newImages = [
     full.frontImageUrl,
     full.backImageUrl,
     full.sideImageUrl,
     ...full.additionalImages,
-  ];
+  ].filter((u): u is string => Boolean(u));
 
   const [updated] = await prisma.$transaction([
     prisma.productImageSubmission.update({

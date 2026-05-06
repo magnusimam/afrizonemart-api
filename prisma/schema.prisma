@@ -1066,12 +1066,14 @@ model ProductImageSubmission {
   internId        String
   intern          User                  @relation("InternSubmissionAuthor", fields: [internId], references: [id], onDelete: Cascade)
   status          ImageSubmissionStatus @default(PENDING_REVIEW)
-  /// Required image roles. The intern must upload all three before
-  /// the API will accept the submission. Stored as named fields for
-  /// simplicity; additional images go into `additionalImages`.
-  frontImageUrl   String
-  backImageUrl    String
-  sideImageUrl    String
+  /// Image roles. Originally all three were required; loosened to
+  /// optional because some products legitimately don't have all 3
+  /// angles (flat items, small bottles where back == side, etc.).
+  /// The submit endpoint enforces "at least one product image" via
+  /// the zod schema instead of the DB.
+  frontImageUrl   String?
+  backImageUrl    String?
+  sideImageUrl    String?
   additionalImages String[]             @default([])
   /// Brand / company logo. Required at the schema level (see
   /// submitImagesBodySchema) so every approved submission gives the
