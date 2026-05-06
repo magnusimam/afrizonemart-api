@@ -1,21 +1,41 @@
 import { z } from 'zod';
 
 const httpsUrl = z.string().url();
+const optionalUrl = z.union([httpsUrl, z.literal(''), z.null()]).optional();
 const altText = z.string().trim().max(200).nullable().optional();
 
-export const submitImagesBodySchema = z.object({
-  frontImageUrl: httpsUrl,
-  backImageUrl: httpsUrl,
-  sideImageUrl: httpsUrl,
-  /// Brand / company logo. Required by the schema so every approved
-  /// submission gives the storefront's "About the brand" section
-  /// something to render. Loosen to optional later if it turns out
-  /// some categories don't have an obvious brand.
-  brandImageUrl: httpsUrl,
-  brandImageAlt: altText,
-  /// Optional extra images beyond the required three (+ brand).
-  additionalImages: z.array(httpsUrl).max(8).default([]),
-});
+export const submitImagesBodySchema = z
+  .object({
+    /// Image angles — all three are *individually* optional because
+    /// some products legitimately don't have a distinct front/back/side
+    /// (flat items, small bottles, etc.). The .superRefine below
+    /// enforces "at least one product image total" so submissions
+    /// can't be empty.
+    frontImageUrl: optionalUrl,
+    backImageUrl: optionalUrl,
+    sideImageUrl: optionalUrl,
+    /// Brand / company logo — still required so every approved
+    /// submission gives the storefront's "About the brand" section
+    /// something to render.
+    brandImageUrl: httpsUrl,
+    brandImageAlt: altText,
+    /// Extra images beyond the named slots.
+    additionalImages: z.array(httpsUrl).max(8).default([]),
+  })
+  .superRefine((b, ctx) => {
+    const productImageCount =
+      (b.frontImageUrl ? 1 : 0) +
+      (b.backImageUrl ? 1 : 0) +
+      (b.sideImageUrl ? 1 : 0) +
+      (b.additionalImages?.length ?? 0);
+    if (productImageCount === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Upload at least one product image (front, back, side, or extra).',
+      });
+    }
+  });
 export type SubmitImagesBody = z.infer<typeof submitImagesBodySchema>;
 
 export const claimQueueBodySchema = z.object({
