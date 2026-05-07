@@ -8,6 +8,17 @@
  * Adding a new placement is one entry here + one piece of frontend code
  * that asks for products with that placement. No schema change needed.
  */
+/// Phase 10.8 — fallback query used when a shelf has fewer explicit
+/// picks than its capacity. Storefront and admin both read from this
+/// so the "what shows when nothing is pinned" answer lives in one
+/// place. Subset of the public products list params.
+export interface ShelfFallbackQuery {
+  category?: string;
+  origin?: string;
+  onSale?: boolean;
+  sort?: 'featured' | 'newest' | 'price-asc' | 'price-desc' | 'rating';
+}
+
 export interface PlacementDef {
   key: string;
   label: string;
@@ -17,6 +28,12 @@ export interface PlacementDef {
   /// when first creating the Shelf row. Falls back to 1 × 6.
   defaultRows?: number;
   defaultCols?: number;
+  /// Phase 10.8 — registered fallback query. When the shelf has fewer
+  /// explicit picks than rows × cols, the storefront fills the gap
+  /// with products matching this filter (excluding already-picked
+  /// IDs). The admin "Quick fill from fallback" button calls the same
+  /// query to bulk-load editable slots.
+  defaultFallback?: ShelfFallbackQuery;
 }
 
 export type PlacementGroup =
@@ -41,6 +58,7 @@ export const PLACEMENT_REGISTRY: PlacementDef[] = [
     group: 'pages',
     defaultRows: 1,
     defaultCols: 6,
+    defaultFallback: { onSale: true, sort: 'newest' },
   },
   {
     key: 'special_discount_top',
@@ -80,33 +98,37 @@ export const PLACEMENT_REGISTRY: PlacementDef[] = [
     group: 'homepage_shelves',
     defaultRows: 4,
     defaultCols: 6,
+    defaultFallback: { category: 'groceries', sort: 'newest' },
   },
   {
     key: 'shelf_for_her',
     label: 'Homepage — Be Style. Be You.',
     description:
-      'The pink-header "Be Style. Be You." rail on the homepage (FemaleProductsSection). Falls back to category=beauty.',
+      'The pink-header "Be Style. Be You." rail on the homepage (FemaleProductsSection). Falls back to personal-care (skincare / makeup / body / hair).',
     group: 'homepage_shelves',
     defaultRows: 1,
     defaultCols: 6,
+    defaultFallback: { category: 'personal-care', sort: 'newest' },
   },
   {
     key: 'shelf_home_essentials',
     label: 'Homepage — Purchase Big. Save Big.',
     description:
-      'The "Purchase Big. Save Big." rail on the homepage (PurchaseBigSection). Falls back to category=interior-decor.',
+      'The "Purchase Big. Save Big." rail on the homepage (PurchaseBigSection). Falls back to category=household.',
     group: 'homepage_shelves',
     defaultRows: 1,
     defaultCols: 6,
+    defaultFallback: { category: 'household', sort: 'newest' },
   },
   {
     key: 'shelf_books',
     label: 'Homepage — Come For The Book',
     description:
-      'The "Come For The Book, Leave With The Knowledge" rail on the homepage (BooksSection). Falls back to category=books.',
+      'The "Come For The Book, Leave With The Knowledge" rail on the homepage (BooksSection). No books category exists yet — manual picks only until books are imported.',
     group: 'homepage_shelves',
     defaultRows: 2,
     defaultCols: 6,
+    defaultFallback: { category: 'books', sort: 'newest' },
   },
   {
     key: 'shelf_for_him',
@@ -123,10 +145,11 @@ export const PLACEMENT_REGISTRY: PlacementDef[] = [
     key: 'staff_picks',
     label: "Homepage — Don't Wait! / Customer Favourites",
     description:
-      "The amber-header \"Don't Wait! The Time Will Never Be Just Right!\" rail on the homepage (FavouritesSection). Falls back to sort=newest.",
+      "The amber-header \"Don't Wait! The Time Will Never Be Just Right!\" rail on the homepage (FavouritesSection). Falls back to sort=newest across the whole catalog.",
     group: 'curated_lists',
     defaultRows: 4,
     defaultCols: 6,
+    defaultFallback: { sort: 'newest' },
   },
   {
     key: 'best_of_africa',

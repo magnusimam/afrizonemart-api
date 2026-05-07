@@ -144,6 +144,7 @@ export async function adminListShelves() {
       group: def.group as string,
       shelf: row ?? defaultShelfFor(def.key),
       productCount: countByKey.get(def.key) ?? 0,
+      defaultFallback: def.defaultFallback ?? null,
     };
   });
 
@@ -159,6 +160,7 @@ export async function adminListShelves() {
       group: 'cms_pages',
       shelf: byKey.get(key) ?? defaultShelfFor(key),
       productCount: countByKey.get(key) ?? 0,
+      defaultFallback: null,
     }));
 
   return {
@@ -170,6 +172,7 @@ export async function adminListShelves() {
 export async function adminGetShelf(key: string) {
   await assertValidKey(key);
   const shelf = await getShelfConfig(key);
+  const def = REGISTRY_BY_KEY[key];
   const placements = await prisma.productPlacement.findMany({
     where: { placement: key },
     orderBy: { sortOrder: 'asc' },
@@ -201,6 +204,7 @@ export async function adminGetShelf(key: string) {
 
   return {
     shelf,
+    defaultFallback: def?.defaultFallback ?? null,
     items: placements.map((p) => ({
       productId: p.productId,
       sortOrder: p.sortOrder,
