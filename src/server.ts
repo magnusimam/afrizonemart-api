@@ -59,10 +59,45 @@ if (env.SENTRY_DSN) {
   Sentry.setupExpressErrorHandler(app);
 }
 
-// helmet's cross-origin-resource-policy=same-origin would block the
-// frontend (different port in dev) from loading uploaded images. Loosen
-// it to cross-origin so /uploads/* assets render on the storefront.
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+// Phase 11.3 (audit H10) — full helmet config.
+//
+// crossOriginResourcePolicy stays `cross-origin` so the storefront can
+// load `/uploads/*` from a different origin in dev (and from
+// `images.afrizonemart.com` in prod, served by R2 anyway).
+//
+// Everything else is hardened:
+//  - hsts forces HTTPS on api.afrizonemart.com (1y, includeSubDomains,
+//    preload-eligible).
+//  - frameguard / frame-ancestors deny — the API should never be
+//    framed; nothing here is meant to be embedded.
+//  - noSniff — important alongside the upload-MIME work (audit H8);
+//    blocks browsers from re-typing an `image/png` upload as HTML
+//    even if a future code path drops the `Content-Type: image/png`.
+//  - referrerPolicy strict-origin-when-cross-origin — don't leak the
+//    full URL (which can include order/payment refs) on outbound
+//    redirects.
+//  - contentSecurityPolicy: API responses are JSON, but the static
+//    `/uploads/*` handler can serve HTML if a malicious upload
+//    bypassed the MIME filter. `default-src 'none'` + `img-src 'self'`
+//    means even if HTML did slip through, no scripts/iframes would
+//    execute.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    hsts: { maxAge: 31_536_000, includeSubDomains: true, preload: true },
+    frameguard: { action: 'deny' },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    noSniff: true,
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'none'"],
+        imgSrc: ["'self'", 'data:'],
+        frameAncestors: ["'none'"],
+      },
+    },
+  }),
+);
 
 // CORS: allow our explicit list (CORS_ORIGINS env) plus any Vercel
 // per-deploy URL under our project. Vercel mints a unique URL for every
