@@ -1,5 +1,6 @@
 import { logger } from '@/infra/logger';
 import type { PaymentGateway } from './gateway';
+import { FlutterwaveGateway } from './flutterwave-gateway';
 import { GtSquadGateway } from './gtsquad-gateway';
 import { StubGateway } from './stub-gateway';
 
@@ -74,6 +75,45 @@ export const PROVIDER_FACTORIES: Record<ProviderKey, ProviderDefinition> = {
       if (!secret) throw new Error('Squad: secretKey is required.');
       const env = environment === 'live' ? 'live' : 'sandbox';
       return new GtSquadGateway(secret, env);
+    },
+  },
+  flutterwave: {
+    key: 'flutterwave',
+    displayName: 'Flutterwave',
+    defaultLabel: 'Card / Flutterwave',
+    /// Flutterwave's pan-African coverage — admin can pick any subset.
+    supportedCurrencies: [
+      'NGN', 'USD', 'EUR', 'GBP',
+      'GHS', 'KES', 'UGX', 'TZS', 'ZAR', 'RWF', 'ZMW',
+      'XAF', 'XOF',
+    ],
+    /// Same base URL for sandbox + live; the key prefix
+    /// (FLWSECK_TEST- vs FLWSECK-) determines the environment, so the
+    /// admin form skips the env selector.
+    hasEnvironments: false,
+    credentialFields: [
+      {
+        key: 'secretKey',
+        label: 'Secret key',
+        type: 'password',
+        required: true,
+        helpText: 'FLWSECK_TEST-… for test, FLWSECK-… for live.',
+      },
+      {
+        key: 'secretHash',
+        label: 'Webhook secret hash',
+        type: 'password',
+        required: true,
+        helpText:
+          'The "Secret Hash" set on your Flutterwave dashboard under Settings → Webhooks. Must match exactly — Flutterwave sends it in the verif-hash header.',
+      },
+    ],
+    build: ({ credentials }) => {
+      const secret = String(credentials.secretKey ?? '');
+      const hash = String(credentials.secretHash ?? '');
+      if (!secret) throw new Error('Flutterwave: secretKey is required.');
+      if (!hash) throw new Error('Flutterwave: secretHash is required.');
+      return new FlutterwaveGateway(secret, hash);
     },
   },
   stub: {
