@@ -55,16 +55,62 @@ export async function findProducts(query: ListProductsQuery) {
     }
   })();
 
-  const [items, total] = await Promise.all([
-    prisma.product.findMany({
-      where,
-      orderBy,
-      skip: (query.page - 1) * query.limit,
-      take: query.limit,
-      include: { category: true },
-    }),
+  // Rank products with images above products without images, then
+  // apply the requested sort within each group. We do this with two
+  // parallel queries (with-images-first / empty-second) and stitch
+  // them across the page boundary. Reason: customers shouldn't see
+  // empty placeholders before products that already have photos —
+  // newly imported SKUs sit at the top of `createdAt DESC` until
+  // interns approve images, which made the storefront look broken.
+  const skip = (query.page - 1) * query.limit;
+  const take = query.limit;
+
+  const withImagesWhere: Prisma.ProductWhereInput = {
+    ...where,
+    NOT: { images: { isEmpty: true } },
+  };
+  const withoutImagesWhere: Prisma.ProductWhereInput = {
+    ...where,
+    images: { isEmpty: true },
+  };
+
+  const [withImagesCount, total] = await Promise.all([
+    prisma.product.count({ where: withImagesWhere }),
     prisma.product.count({ where }),
   ]);
+
+  const items: Awaited<ReturnType<typeof prisma.product.findMany>> = [];
+  if (skip < withImagesCount) {
+    const takeFromWith = Math.min(take, withImagesCount - skip);
+    const withItems = await prisma.product.findMany({
+      where: withImagesWhere,
+      orderBy,
+      skip,
+      take: takeFromWith,
+      include: { category: true },
+    });
+    items.push(...withItems);
+    const remaining = take - items.length;
+    if (remaining > 0) {
+      const withoutItems = await prisma.product.findMany({
+        where: withoutImagesWhere,
+        orderBy,
+        skip: 0,
+        take: remaining,
+        include: { category: true },
+      });
+      items.push(...withoutItems);
+    }
+  } else {
+    const withoutItems = await prisma.product.findMany({
+      where: withoutImagesWhere,
+      orderBy,
+      skip: skip - withImagesCount,
+      take,
+      include: { category: true },
+    });
+    items.push(...withoutItems);
+  }
 
   return { items, total, page: query.page, limit: query.limit };
 }
