@@ -2,6 +2,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { eventBus, type EventMap } from '@/infra/eventBus';
 import { logger } from '@/infra/logger';
 import { prisma } from '@/infra/prisma';
+import { assertUrlIsPublic } from '@/lib/url-safety';
 
 const KNOWN_EVENTS: (keyof EventMap)[] = [
   'order.placed',
@@ -53,6 +54,13 @@ async function attemptDelivery(input: DeliveryAttemptInput): Promise<DeliveryAtt
   let statusCode = 0;
   let responseBody: string | null = null;
   try {
+    // Phase 11.3 (audit H5): re-check the URL right before the fetch.
+    // DNS results can change between admin-save and dispatch, so we
+    // reject any URL that resolves to a private / loopback / metadata
+    // address. Throws → falls into the catch below; the delivery is
+    // logged with the SSRF reason for the admin to debug.
+    await assertUrlIsPublic(input.url);
+
     const res = await fetch(input.url, {
       method: 'POST',
       headers: {
