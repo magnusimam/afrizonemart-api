@@ -27,6 +27,22 @@ export const listProductsQuerySchema = z.object({
   placement: z.string().optional(),
   /** Country scope used together with placement; ignored otherwise. */
   country: z.string().length(2).optional(),
+  /**
+   * Phase 10.8 — explicit product-id list. Accepts either a CSV string
+   * or repeated query keys (`?ids=a&ids=b`). When set, the response is
+   * exactly these products, in this order, and other filters except
+   * `inStock` are ignored. Used by manual-mode product-grid sections
+   * and any UI that fetches a hand-picked list.
+   */
+  ids: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      const arr = Array.isArray(v) ? v : v.split(',');
+      const cleaned = arr.map((s) => s.trim()).filter(Boolean);
+      return cleaned.length > 0 ? cleaned.slice(0, 100) : undefined;
+    }),
   sort: z
     .enum(['featured', 'newest', 'price-asc', 'price-desc', 'rating'])
     .default('featured'),

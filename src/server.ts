@@ -23,6 +23,8 @@ import { featureFlagRoutes } from '@/modules/feature-flags/routes';
 import { cmsRoutes } from '@/modules/cms/routes';
 import { fxRoutes } from '@/modules/fx/routes';
 import { categoryRoutes } from '@/modules/categories/routes';
+import { shelfRoutes } from '@/modules/shelves/routes';
+import { seedDefaultShelves } from '@/modules/shelves/service';
 import { blogRoutes } from '@/modules/blog/routes';
 import { contentRoutes } from '@/modules/content/routes';
 import { internRoutes } from '@/modules/intern/routes';
@@ -130,6 +132,7 @@ app.use('/api/content', contentRoutes);
 app.use('/api/intern', internRoutes);
 app.use('/api/fx', fxRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/shelves', shelfRoutes);
 app.use('/api/admin', adminRouter);
 
 // Terminal handlers
@@ -139,6 +142,17 @@ app.use(errorHandler);
 async function start() {
   await connectDatabase();
   await ensureCoreCategories();
+  // Phase 10.8 — write a Shelf row for each registry placement key the
+  // first time the API boots after the shelves migration. Idempotent;
+  // safe to run on every start.
+  try {
+    const r = await seedDefaultShelves();
+    if (r.created > 0) logger.info('shelves.seeded', { created: r.created });
+  } catch (err) {
+    logger.warn('shelves.seed_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
   startWebhookDispatcher();
   startNotificationDispatcher();
   startAbandonedCartCron();

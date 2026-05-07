@@ -13,6 +13,31 @@ import type { ListProductsQuery } from './product.schema';
  */
 
 export async function findProducts(query: ListProductsQuery) {
+  // Phase 10.8 — explicit-id mode. Manual-pick shelves and curated
+  // page-builder sections need to fetch a specific list of products in
+  // the order the editor arranged them. Other filters (sort, category,
+  // placement, country) don't apply here — the caller already decided
+  // membership and order. We honour `inStock` so an editor's pick that
+  // goes out of stock can be hidden without re-saving the shelf.
+  if (query.ids && query.ids.length > 0) {
+    const idWhere: Prisma.ProductWhereInput = { id: { in: query.ids } };
+    if (query.inStock !== undefined) idWhere.inStock = query.inStock;
+    const items = await prisma.product.findMany({
+      where: idWhere,
+      include: { category: true },
+    });
+    const byId = new Map(items.map((p) => [p.id, p]));
+    const ordered = query.ids
+      .map((id) => byId.get(id))
+      .filter((p): p is NonNullable<typeof p> => Boolean(p));
+    return {
+      items: ordered,
+      total: ordered.length,
+      page: 1,
+      limit: ordered.length || 1,
+    };
+  }
+
   const where: Prisma.ProductWhereInput = {};
 
   if (query.category) {

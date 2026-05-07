@@ -637,6 +637,35 @@ model ProductPlacement {
 }
 
 // ------------------------------------------------------------------
+// Phase 10.8 — Shelf Manager
+//
+// One row per placement key. Stores the *container* config — title,
+// rows, columns, enabled flag — that the storefront uses when rendering
+// that shelf. Per-product membership lives in ProductPlacement; Shelf
+// is just the wrapper config so non-engineers can change "show 1 row"
+// vs "show 3 rows", rename a shelf, or hide it from admin.
+// ------------------------------------------------------------------
+
+model Shelf {
+  id        String   @id @default(cuid())
+  /// Matches a key from PLACEMENT_REGISTRY or "cms:<page-slug>".
+  key       String   @unique
+  /// Storefront-facing heading shown above the products.
+  title     String
+  /// Optional sub-heading line under the title.
+  subtitle  String?
+  /// Number of rows of products to render. limit = rows * cols.
+  rows      Int      @default(1)
+  /// Columns at the widest breakpoint. Storefront still uses
+  /// responsive col-count for narrower screens.
+  cols      Int      @default(6)
+  /// When false the storefront skips the shelf entirely.
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ------------------------------------------------------------------
 // Phase 10.6 — CMS / Page Builder
 //
 // Marketing-editable static-ish pages. Blocks JSON tree is rendered by
