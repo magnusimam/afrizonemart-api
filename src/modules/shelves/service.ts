@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
 import {
@@ -69,13 +69,88 @@ export async function getShelfConfig(key: string) {
   return defaultShelfFor(key);
 }
 
-/// Public read — returns the shelf config + the products currently
-/// pinned to it, ordered by ProductPlacement.sortOrder, optionally
-/// scoped by country (matches the placement filter behaviour).
+/// Parses + validates the `countryRows` JSON column. Returns null when
+/// the column is null, missing, or shaped wrong — caller treats null
+/// as "use the explicit-picks path instead".
+function parseCountryRows(
+  raw: unknown,
+): Array<{ country: string | null; count: number }> | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out: Array<{ country: string | null; count: number }> = [];
+  for (const r of raw) {
+    if (!r || typeof r !== 'object') continue;
+    const row = r as { country?: unknown; count?: unknown };
+    const country =
+      typeof row.country === 'string' && row.country.length === 2
+        ? row.country.toUpperCase()
+        : null;
+    const count = typeof row.count === 'number' && row.count > 0 ? Math.floor(row.count) : 0;
+    if (count > 0) out.push({ country, count });
+  }
+  return out.length > 0 ? out : null;
+}
+
+/// Public read — returns the shelf config + products to render. Two
+/// paths:
+///   1. **Country-rule mode**: when `Shelf.countryRows` is set, the
+///      result is the rows concatenated in order — `[ZA × N, NG × M, …]`.
+///      Picks + fallback are ignored. Auto-updates as the catalog
+///      grows; editor doesn't need to re-pick anything.
+///   2. **Pick mode** (default): explicit ProductPlacement rows in
+///      sortOrder, scoped by country. The fallback (if any) is applied
+///      by the storefront component, not here.
 export async function readShelf(key: string, country?: string) {
   const shelf = await getShelfConfig(key);
   if (!shelf.enabled) return { shelf, items: [] as Awaited<ReturnType<typeof loadProducts>> };
 
+  const cap = Math.max(1, shelf.rows * shelf.cols);
+
+  // Mode 1 — country-rule.
+  // Read `countryRows` off the row; default-shelf objects (from
+  // defaultShelfFor) have no such field, hence the cast.
+  const rules = parseCountryRows(
+    (shelf as { countryRows?: unknown }).countryRows ?? null,
+  );
+  if (rules) {
+    const items: Awaited<ReturnType<typeof loadProducts>> = [];
+    const usedIds = new Set<string>();
+    for (const rule of rules) {
+      if (items.length >= cap) break;
+      const remaining = cap - items.length;
+      const take = Math.min(rule.count, remaining);
+      const where: Prisma.ProductWhereInput = {
+        ...(rule.country ? { origin: rule.country } : {}),
+        ...(usedIds.size > 0 ? { id: { notIn: Array.from(usedIds) } } : {}),
+      };
+      // Prefer products with images; fall back to those without if
+      // the country has nothing else.
+      const withImages = await prisma.product.findMany({
+        where: { ...where, NOT: { images: { isEmpty: true } } },
+        orderBy: { createdAt: 'desc' },
+        take,
+        include: { category: true },
+      });
+      const need = take - withImages.length;
+      let withoutImages: typeof withImages = [];
+      if (need > 0) {
+        withoutImages = await prisma.product.findMany({
+          where: { ...where, images: { isEmpty: true } },
+          orderBy: { createdAt: 'desc' },
+          take: need,
+          include: { category: true },
+        });
+      }
+      for (const p of [...withImages, ...withoutImages]) {
+        if (usedIds.has(p.id)) continue;
+        usedIds.add(p.id);
+        items.push(p);
+        if (items.length >= cap) break;
+      }
+    }
+    return { shelf, items };
+  }
+
+  // Mode 2 — explicit picks.
   const upperCountry = country?.toUpperCase();
   const now = new Date();
   const placements = await prisma.productPlacement.findMany({
@@ -101,8 +176,7 @@ export async function readShelf(key: string, country?: string) {
   });
 
   const ids = placements.map((p) => p.productId);
-  const limit = Math.max(1, shelf.rows * shelf.cols);
-  const items = await loadProducts(ids.slice(0, limit));
+  const items = await loadProducts(ids.slice(0, cap));
   // Re-order to match the placement order; loadProducts may return
   // items in arbitrary DB order.
   const byId = new Map(items.map((p) => [p.id, p]));
@@ -219,6 +293,25 @@ export async function adminGetShelf(key: string) {
 export async function adminUpdateShelf(key: string, input: AdminUpdateShelfInput) {
   await assertValidKey(key);
   const seed = defaultShelfFor(key);
+  // Normalise countryRows: null/[] → null (clears rule mode); array →
+  // strip rows with count <= 0 and uppercase country codes for storage.
+  const normalisedRows =
+    input.countryRows === undefined
+      ? undefined
+      : input.countryRows === null
+        ? null
+        : input.countryRows
+            .filter((r) => r.count > 0)
+            .map((r) => ({
+              country: r.country ? r.country.toUpperCase() : null,
+              count: r.count,
+            }));
+  const rowsForDb =
+    normalisedRows === undefined
+      ? undefined
+      : normalisedRows && normalisedRows.length > 0
+        ? (normalisedRows as Prisma.InputJsonValue)
+        : Prisma.DbNull;
   const upserted = await prisma.shelf.upsert({
     where: { key },
     create: {
@@ -228,6 +321,7 @@ export async function adminUpdateShelf(key: string, input: AdminUpdateShelfInput
       rows: input.rows ?? seed.rows,
       cols: input.cols ?? seed.cols,
       enabled: input.enabled ?? seed.enabled,
+      ...(rowsForDb !== undefined ? { countryRows: rowsForDb } : {}),
     },
     update: {
       ...(input.title !== undefined ? { title: input.title } : {}),
@@ -235,6 +329,7 @@ export async function adminUpdateShelf(key: string, input: AdminUpdateShelfInput
       ...(input.rows !== undefined ? { rows: input.rows } : {}),
       ...(input.cols !== undefined ? { cols: input.cols } : {}),
       ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+      ...(rowsForDb !== undefined ? { countryRows: rowsForDb } : {}),
     },
   });
   return upserted;

@@ -661,6 +661,13 @@ model Shelf {
   cols      Int      @default(6)
   /// When false the storefront skips the shelf entirely.
   enabled   Boolean  @default(true)
+  /// Phase 10.8b — country-rule auto-fill. When set (non-null,
+  /// non-empty), the storefront fills the shelf from these rules
+  /// instead of explicit picks. Format:
+  ///   [{ "country": "ZA", "count": 6 }, { "country": null, "count": 6 }]
+  /// `country: null` means any country. Rows render in the order
+  /// they appear in the array.
+  countryRows Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
