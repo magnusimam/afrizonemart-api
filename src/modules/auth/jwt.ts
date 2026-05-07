@@ -1,4 +1,4 @@
-import jwt, { type SignOptions } from 'jsonwebtoken';
+import jwt, { type SignOptions, type VerifyOptions } from 'jsonwebtoken';
 import { env } from '@/config/env';
 
 /**
@@ -8,10 +8,33 @@ import { env } from '@/config/env';
  *  - access  — short-lived (default 15m), sent in `Authorization: Bearer`
  *  - refresh — long-lived (default 30d), used to obtain a new access
  *
- * The refresh token's hash is also stored on the User row so we can revoke
- * a single session by clearing it. JWT_SECRET signs both — separation of
- * secrets can come later if we want to rotate access independently.
+ * Phase 11.3 (audit H6) hardening:
+ *  - **algorithm pinned to HS256** on both sign + verify. Defends
+ *    against historical `alg: 'none'` and HS↔RS confusion attacks.
+ *  - **issuer + audience claims** pinned to `afrizonemart`. Tokens
+ *    minted by another instance (or a different service that shares
+ *    the secret by accident) won't be accepted.
+ *
+ * The refresh token's hash is also stored on the User row so we can
+ * revoke a single session by clearing it. JWT_SECRET signs both —
+ * separation of secrets can come later if we want to rotate access
+ * independently.
  */
+
+const JWT_ISSUER = 'afrizonemart';
+const JWT_AUDIENCE = 'afrizonemart';
+
+const SIGN_BASE: SignOptions = {
+  algorithm: 'HS256',
+  issuer: JWT_ISSUER,
+  audience: JWT_AUDIENCE,
+};
+
+export const VERIFY_OPTIONS: VerifyOptions = {
+  algorithms: ['HS256'],
+  issuer: JWT_ISSUER,
+  audience: JWT_AUDIENCE,
+};
 
 export interface AccessTokenPayload {
   sub: string;
@@ -26,16 +49,18 @@ export interface RefreshTokenPayload {
 
 export function signAccessToken(payload: AccessTokenPayload): string {
   return jwt.sign(payload, env.JWT_SECRET, {
+    ...SIGN_BASE,
     expiresIn: env.JWT_EXPIRES_IN,
   } as SignOptions);
 }
 
 export function signRefreshToken(payload: RefreshTokenPayload): string {
   return jwt.sign(payload, env.JWT_SECRET, {
+    ...SIGN_BASE,
     expiresIn: env.JWT_REFRESH_EXPIRES_IN,
   } as SignOptions);
 }
 
 export function verifyRefreshToken(token: string): RefreshTokenPayload {
-  return jwt.verify(token, env.JWT_SECRET) as RefreshTokenPayload;
+  return jwt.verify(token, env.JWT_SECRET, VERIFY_OPTIONS) as RefreshTokenPayload;
 }

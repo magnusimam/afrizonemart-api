@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '@/config/env';
+import { VERIFY_OPTIONS } from '@/modules/auth/jwt';
 import { HttpError } from './error-handler';
 
 /**
@@ -28,7 +29,10 @@ interface AccessTokenClaims {
 }
 
 function userFromToken(token: string): AuthUser {
-  const claims = jwt.verify(token, env.JWT_SECRET) as AccessTokenClaims;
+  // Phase 11.3 (audit H6): pin algorithm + iss + aud — VERIFY_OPTIONS
+  // is the single source of truth shared with auth/jwt.ts so a future
+  // change in one place can't drift here.
+  const claims = jwt.verify(token, env.JWT_SECRET, VERIFY_OPTIONS) as AccessTokenClaims;
   return { id: claims.sub, email: claims.email, role: claims.role };
 }
 
