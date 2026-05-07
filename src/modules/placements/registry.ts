@@ -13,6 +13,10 @@ export interface PlacementDef {
   label: string;
   description: string;
   group: PlacementGroup;
+  /// Phase 10.8 — default rows × cols used by `seedDefaultShelves()`
+  /// when first creating the Shelf row. Falls back to 1 × 6.
+  defaultRows?: number;
+  defaultCols?: number;
 }
 
 export type PlacementGroup =
@@ -25,15 +29,18 @@ export const PLACEMENT_REGISTRY: PlacementDef[] = [
   // ------------ Featured pages ------------
   {
     key: 'homepage_hero',
-    label: 'Homepage hero',
+    label: 'Homepage — Hero slides',
     description: 'Pinned to the big rotating hero on the storefront homepage.',
     group: 'pages',
   },
   {
     key: 'homepage_featured',
-    label: 'Homepage featured row',
-    description: 'Appears in the "Featured today" rail just below the hero.',
+    label: "Homepage — Today's Deals Just For You!",
+    description:
+      'The "Today\'s Deals Just For You!" rail on the homepage (DealsSection). Falls back to onSale=true.',
     group: 'pages',
+    defaultRows: 1,
+    defaultCols: 6,
   },
   {
     key: 'special_discount_top',
@@ -62,43 +69,64 @@ export const PLACEMENT_REGISTRY: PlacementDef[] = [
   },
 
   // ------------ Homepage shelves ------------
+  // Each entry below renders a specific homepage section. The label
+  // mirrors the storefront heading the customer sees so editors don't
+  // have to guess which shelf is which.
   {
-    key: 'shelf_for_her',
-    label: 'Shelf — For Her',
-    description: 'Curated "For Her" homepage rail.',
+    key: 'shelf_groceries',
+    label: 'Homepage — Groceries, Beverages & Drinks',
+    description:
+      'The pink-header "Groceries, Beverages & Drinks" rail on the homepage (ProductsSection). Falls back to category=groceries.',
     group: 'homepage_shelves',
+    defaultRows: 4,
+    defaultCols: 6,
   },
   {
-    key: 'shelf_for_him',
-    label: 'Shelf — For Him',
-    description: 'Curated "For Him" homepage rail.',
+    key: 'shelf_for_her',
+    label: 'Homepage — Be Style. Be You.',
+    description:
+      'The pink-header "Be Style. Be You." rail on the homepage (FemaleProductsSection). Falls back to category=beauty.',
     group: 'homepage_shelves',
+    defaultRows: 1,
+    defaultCols: 6,
   },
   {
     key: 'shelf_home_essentials',
-    label: 'Shelf — Home Essentials',
-    description: 'Curated "Home Essentials" homepage rail.',
+    label: 'Homepage — Purchase Big. Save Big.',
+    description:
+      'The "Purchase Big. Save Big." rail on the homepage (PurchaseBigSection). Falls back to category=interior-decor.',
     group: 'homepage_shelves',
-  },
-  {
-    key: 'shelf_groceries',
-    label: 'Shelf — Groceries pick',
-    description: 'Curator override for the homepage groceries section.',
-    group: 'homepage_shelves',
+    defaultRows: 1,
+    defaultCols: 6,
   },
   {
     key: 'shelf_books',
-    label: 'Shelf — Books pick',
-    description: 'Curator override for the homepage books section.',
+    label: 'Homepage — Come For The Book',
+    description:
+      'The "Come For The Book, Leave With The Knowledge" rail on the homepage (BooksSection). Falls back to category=books.',
     group: 'homepage_shelves',
+    defaultRows: 2,
+    defaultCols: 6,
+  },
+  {
+    key: 'shelf_for_him',
+    label: 'Shelf — For Him (not on homepage yet)',
+    description:
+      'Reserved for a "For Him" rail. Currently not surfaced on the homepage — wire a section that calls placement="shelf_for_him" before pinning products here.',
+    group: 'homepage_shelves',
+    defaultRows: 1,
+    defaultCols: 6,
   },
 
   // ------------ Curated lists ------------
   {
     key: 'staff_picks',
-    label: 'Staff Picks',
-    description: 'Hand-picked by Afrizonemart staff.',
+    label: "Homepage — Don't Wait! / Customer Favourites",
+    description:
+      "The amber-header \"Don't Wait! The Time Will Never Be Just Right!\" rail on the homepage (FavouritesSection). Falls back to sort=newest.",
     group: 'curated_lists',
+    defaultRows: 4,
+    defaultCols: 6,
   },
   {
     key: 'best_of_africa',

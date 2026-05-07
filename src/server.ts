@@ -147,7 +147,12 @@ async function start() {
   // safe to run on every start.
   try {
     const r = await seedDefaultShelves();
-    if (r.created > 0) logger.info('shelves.seeded', { created: r.created });
+    if (r.created > 0 || r.refreshed > 0) {
+      logger.info('shelves.seeded', {
+        created: r.created,
+        refreshed: r.refreshed,
+      });
+    }
   } catch (err) {
     logger.warn('shelves.seed_failed', {
       error: err instanceof Error ? err.message : String(err),

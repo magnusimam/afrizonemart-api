@@ -28,16 +28,17 @@ import type {
  */
 
 /// Default container config used when a shelf row doesn't exist yet —
-/// keeps the storefront rendering even if seeding hasn't run. Title is
-/// pulled from the registry when possible.
+/// keeps the storefront rendering even if seeding hasn't run. Title and
+/// rows × cols are pulled from the registry when set, with a 1 × 6
+/// fallback for keys that haven't been customised in the registry.
 function defaultShelfFor(key: string) {
   const def = REGISTRY_BY_KEY[key];
   return {
     key,
     title: def?.label ?? humaniseKey(key),
     subtitle: null as string | null,
-    rows: 1,
-    cols: 6,
+    rows: def?.defaultRows ?? 1,
+    cols: def?.defaultCols ?? 6,
     enabled: true,
   };
 }
@@ -287,21 +288,64 @@ export async function adminSetShelfProducts(
 }
 
 /// Idempotent seeder — writes a Shelf row for every static placement
-/// key with sensible defaults. Called once after the migration runs.
+/// key with the registry-supplied title + rows × cols. Runs on every
+/// API boot.
+///
+/// Two passes:
+///  1. Insert any missing keys.
+///  2. **Re-sync rows that look unedited** — when `updatedAt` ≈
+///     `createdAt` (within 2s of creation), assume an editor hasn't
+///     touched the shelf and refresh title/rows/cols from the registry
+///     so registry renames propagate without an admin doing busywork.
+///     Once an editor saves a shelf in `/admin/shelves`, `updatedAt`
+///     diverges from `createdAt` and we leave the row alone.
 export async function seedDefaultShelves() {
-  const existing = await prisma.shelf.findMany({ select: { key: true } });
-  const have = new Set(existing.map((s) => s.key));
-  const toCreate = PLACEMENT_REGISTRY.filter((d) => !have.has(d.key));
-  if (toCreate.length === 0) return { created: 0 };
-  await prisma.shelf.createMany({
-    data: toCreate.map((d) => ({
-      key: d.key,
-      title: d.label,
-      subtitle: null,
-      rows: 1,
-      cols: 6,
-      enabled: true,
-    })),
+  const existing = await prisma.shelf.findMany({
+    select: { key: true, createdAt: true, updatedAt: true },
   });
-  return { created: toCreate.length };
+  const have = new Map(existing.map((s) => [s.key, s]));
+
+  // Pass 1 — insert missing.
+  const toCreate = PLACEMENT_REGISTRY.filter((d) => !have.has(d.key));
+  if (toCreate.length > 0) {
+    await prisma.shelf.createMany({
+      data: toCreate.map((d) => ({
+        key: d.key,
+        title: d.label,
+        subtitle: null,
+        rows: d.defaultRows ?? 1,
+        cols: d.defaultCols ?? 6,
+        enabled: true,
+      })),
+    });
+  }
+
+  // Pass 2 — refresh unedited rows from the registry.
+  let refreshed = 0;
+  for (const def of PLACEMENT_REGISTRY) {
+    const row = have.get(def.key);
+    if (!row) continue;
+    const drift = Math.abs(row.updatedAt.getTime() - row.createdAt.getTime());
+    if (drift > 2000) continue;
+    await prisma.shelf.update({
+      where: { key: def.key },
+      data: {
+        title: def.label,
+        rows: def.defaultRows ?? 1,
+        cols: def.defaultCols ?? 6,
+        // Bump updatedAt so subsequent registry edits also propagate
+        // up to the next admin save — but allow ≤ 2s drift on the next
+        // seed pass too. We do this by setting updatedAt = createdAt
+        // explicitly to keep the row in the "unedited" pool.
+      },
+    });
+    // Re-pin updatedAt to createdAt so the row stays in the "unedited"
+    // pool and subsequent registry tweaks keep flowing through. As
+    // soon as an admin uses the editor, updatedAt advances and we
+    // stop overwriting.
+    await prisma.$executeRaw`UPDATE "Shelf" SET "updatedAt" = "createdAt" WHERE "key" = ${def.key}`;
+    refreshed += 1;
+  }
+
+  return { created: toCreate.length, refreshed };
 }
