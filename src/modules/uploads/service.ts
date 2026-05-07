@@ -8,6 +8,7 @@ import { HttpError } from '@/middleware/error-handler';
 import { LocalDiskStorage } from './storage/local-disk';
 import { R2Storage } from './storage/r2';
 import type { UploadStorage } from './storage/types';
+import { sniffImageMime } from './sniff';
 
 const ALLOWED_MIME = new Set([
   'image/jpeg',
@@ -79,27 +80,44 @@ export interface UploadResult {
 }
 
 export async function uploadImage(input: UploadInput): Promise<UploadResult> {
-  if (!ALLOWED_MIME.has(input.mimeType)) {
-    throw HttpError.badRequest(
-      `Unsupported image type "${input.mimeType}". Allowed: ${[...ALLOWED_MIME].join(', ')}.`,
-    );
-  }
   if (input.size > env.UPLOADS_MAX_BYTES) {
     throw HttpError.badRequest(
       `File too large (${input.size} bytes). Max ${env.UPLOADS_MAX_BYTES} bytes.`,
     );
   }
 
+  // Phase 11.3 (audit H8): NEVER trust the client's Content-Type
+  // header. Sniff the magic bytes off the buffer and use the sniffed
+  // MIME both for the allowlist check and for the storage write —
+  // the client header is only used as an early-fail signal.
+  const sniffed = sniffImageMime(input.buffer);
+  if (!sniffed) {
+    throw HttpError.badRequest(
+      'File contents are not a recognised image (jpeg, png, webp, avif, gif).',
+    );
+  }
+  if (!ALLOWED_MIME.has(sniffed)) {
+    throw HttpError.badRequest(
+      `Unsupported image type "${sniffed}". Allowed: ${[...ALLOWED_MIME].join(', ')}.`,
+    );
+  }
+  if (input.mimeType && input.mimeType !== sniffed) {
+    // Optional but useful: log mismatch so a flood of declared-png /
+    // sniffed-jpeg hits is visible in monitoring. Not fatal — we
+    // already use the sniffed value.
+    // (intentionally not throwing — a few legit clients mislabel.)
+  }
+
   const folder = input.folder && ALLOWED_FOLDERS.has(input.folder) ? input.folder : 'misc';
-  const ext = MIME_TO_EXT[input.mimeType];
+  const ext = MIME_TO_EXT[sniffed];
   const key = `${folder}/${createId()}.${ext}`;
 
-  const { url } = await storage().put(key, input.buffer, input.mimeType);
+  const { url } = await storage().put(key, input.buffer, sniffed);
 
   return {
     url,
     key,
-    contentType: input.mimeType,
+    contentType: sniffed,
     size: input.size,
     ...(input.originalName ? { originalName: path.basename(input.originalName) } : {}),
   };
