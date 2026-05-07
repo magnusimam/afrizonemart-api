@@ -140,6 +140,8 @@ export class FlutterwaveGateway implements PaymentGateway {
         tx_ref?: string;
         status?: string;
         flw_ref?: string;
+        amount?: number;
+        currency?: string;
       };
     };
     try {
@@ -152,11 +154,29 @@ export class FlutterwaveGateway implements PaymentGateway {
     const statusStr = (payload.data?.status ?? '').toLowerCase();
     if (!ref) return { status: 'IGNORED', reason: 'Missing tx_ref in payload' };
 
+    // Phase 11.3 (audit H4): Flutterwave reports amount in MAJOR
+    // units (decimals OK), so we just clean + uppercase the currency.
+    const verified =
+      typeof payload.data?.amount === 'number' &&
+      typeof payload.data?.currency === 'string'
+        ? { amount: payload.data.amount, currency: payload.data.currency.toUpperCase() }
+        : undefined;
+
     if (statusStr === 'successful') {
-      return { status: 'SUCCEEDED', gatewayRef: ref, rawPayload: payload as Record<string, unknown> };
+      return {
+        status: 'SUCCEEDED',
+        gatewayRef: ref,
+        verified,
+        rawPayload: payload as Record<string, unknown>,
+      };
     }
     if (statusStr === 'failed' || statusStr === 'cancelled') {
-      return { status: 'FAILED', gatewayRef: ref, rawPayload: payload as Record<string, unknown> };
+      return {
+        status: 'FAILED',
+        gatewayRef: ref,
+        verified,
+        rawPayload: payload as Record<string, unknown>,
+      };
     }
     return { status: 'IGNORED', reason: `Non-terminal status: ${statusStr}` };
   }
@@ -183,10 +203,16 @@ export class FlutterwaveGateway implements PaymentGateway {
     }
 
     const statusStr = (json.data.status ?? '').toLowerCase();
+    const verified =
+      typeof json.data.amount === 'number' &&
+      typeof json.data.currency === 'string'
+        ? { amount: json.data.amount, currency: json.data.currency.toUpperCase() }
+        : undefined;
     if (statusStr === 'successful') {
       return {
         status: 'SUCCEEDED',
         gatewayRef,
+        verified,
         rawPayload: json.data as unknown as Record<string, unknown>,
       };
     }
@@ -194,6 +220,7 @@ export class FlutterwaveGateway implements PaymentGateway {
       return {
         status: 'FAILED',
         gatewayRef,
+        verified,
         rawPayload: json.data as unknown as Record<string, unknown>,
       };
     }

@@ -192,6 +192,46 @@ export async function applyWebhookOutcome(outcome: WebhookOutcome): Promise<{ ac
   // Already settled? No-op.
   if (payment.status === outcome.status) return { acknowledged: true };
 
+  // Phase 11.3 (audit H4): if the gateway reported an amount/currency,
+  // verify they match the order. A compromised gateway account or
+  // misconfigured provider can otherwise downgrade an order's amount
+  // (e.g. report ₦5 paid when the order is ₦50,000). One Naira of
+  // tolerance for rounding noise on currency conversions.
+  if (outcome.status === 'SUCCEEDED' && outcome.verified) {
+    const claimed = outcome.verified;
+    const orderTotal = payment.order.total;
+    const orderCurrency = payment.order.currency.toUpperCase();
+    const amountMismatch = Math.abs(claimed.amount - orderTotal) > 1;
+    const currencyMismatch = claimed.currency !== orderCurrency;
+    if (amountMismatch || currencyMismatch) {
+      logger.error('payments.webhook_amount_mismatch', {
+        orderId: payment.orderId,
+        gatewayRef: outcome.gatewayRef,
+        claimedAmount: claimed.amount,
+        claimedCurrency: claimed.currency,
+        orderAmount: orderTotal,
+        orderCurrency,
+      });
+      await logAudit({
+        entityType: 'order',
+        entityId: payment.orderId,
+        action: 'payment.webhook_rejected',
+        changes: {
+          reason: 'amount_or_currency_mismatch',
+          gatewayRef: outcome.gatewayRef,
+          claimedAmount: claimed.amount,
+          claimedCurrency: claimed.currency,
+          orderAmount: orderTotal,
+          orderCurrency,
+        },
+      });
+      return {
+        acknowledged: false,
+        reason: 'Amount or currency does not match the order',
+      };
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.payment.update({
       where: { id: payment.id },

@@ -153,11 +153,29 @@ export class GtSquadGateway implements PaymentGateway {
     const statusStr = (inner.transaction_status ?? '').toLowerCase();
     if (!ref) return { status: 'IGNORED', reason: 'Missing transaction_ref in payload' };
 
+    // Phase 11.3 (audit H4): normalise amount to MAJOR units. Squad
+    // wires money in kobo/cents (₦1.00 = 100); we divide by 100 so
+    // the service layer compares against the order total directly.
+    const verified =
+      typeof inner.amount === 'number' && typeof inner.currency === 'string'
+        ? { amount: inner.amount / 100, currency: inner.currency.toUpperCase() }
+        : undefined;
+
     if (statusStr === 'success') {
-      return { status: 'SUCCEEDED', gatewayRef: ref, rawPayload: payload as Record<string, unknown> };
+      return {
+        status: 'SUCCEEDED',
+        gatewayRef: ref,
+        verified,
+        rawPayload: payload as Record<string, unknown>,
+      };
     }
     if (statusStr === 'failed' || statusStr === 'abandoned') {
-      return { status: 'FAILED', gatewayRef: ref, rawPayload: payload as Record<string, unknown> };
+      return {
+        status: 'FAILED',
+        gatewayRef: ref,
+        verified,
+        rawPayload: payload as Record<string, unknown>,
+      };
     }
     // Pending or unknown — don't flip the order yet.
     return { status: 'IGNORED', reason: `Non-terminal status: ${statusStr}` };
@@ -192,11 +210,29 @@ export class GtSquadGateway implements PaymentGateway {
 
     const data = (json as SquadVerifyResponse).data;
     const statusStr = (data.transaction_status ?? '').toLowerCase();
+    // Squad's verify endpoint also reports kobo/cents — normalise.
+    const verified =
+      typeof data.transaction_amount === 'number'
+        ? {
+            amount: data.transaction_amount / 100,
+            currency: (data.transaction_currency_id ?? '').toUpperCase(),
+          }
+        : undefined;
     if (statusStr === 'success') {
-      return { status: 'SUCCEEDED', gatewayRef, rawPayload: data as unknown as Record<string, unknown> };
+      return {
+        status: 'SUCCEEDED',
+        gatewayRef,
+        verified,
+        rawPayload: data as unknown as Record<string, unknown>,
+      };
     }
     if (statusStr === 'failed' || statusStr === 'abandoned') {
-      return { status: 'FAILED', gatewayRef, rawPayload: data as unknown as Record<string, unknown> };
+      return {
+        status: 'FAILED',
+        gatewayRef,
+        verified,
+        rawPayload: data as unknown as Record<string, unknown>,
+      };
     }
     return { status: 'IGNORED', reason: `Non-terminal status: ${statusStr}` };
   }

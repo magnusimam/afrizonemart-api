@@ -26,9 +26,30 @@ export interface InitResult {
   rawPayload?: Record<string, unknown>;
 }
 
+/// Phase 11.3 (audit H4): every successful outcome carries a
+/// **normalised** amount + currency so the service layer can verify
+/// the gateway reported the same numbers it minted. Amount is in
+/// MAJOR units (Naira whole, USD whole — never kobo/cents) so all
+/// providers report on the same scale regardless of their wire
+/// format. Currency is uppercase ISO-4217.
+export interface VerifiedSettlement {
+  amount: number;
+  currency: string;
+}
+
 export type WebhookOutcome =
-  | { status: 'SUCCEEDED'; gatewayRef: string; rawPayload: Record<string, unknown> }
-  | { status: 'FAILED'; gatewayRef: string; rawPayload: Record<string, unknown> }
+  | {
+      status: 'SUCCEEDED';
+      gatewayRef: string;
+      verified?: VerifiedSettlement;
+      rawPayload: Record<string, unknown>;
+    }
+  | {
+      status: 'FAILED';
+      gatewayRef: string;
+      verified?: VerifiedSettlement;
+      rawPayload: Record<string, unknown>;
+    }
   | { status: 'IGNORED'; reason: string };
 
 export interface PaymentGateway {
