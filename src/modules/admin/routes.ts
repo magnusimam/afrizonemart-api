@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '@/middleware/auth';
 import { requireRole } from '@/middleware/require-role';
+import { requireCapability } from '@/middleware/require-capability';
 import { adminBrandRoutes, adminProductRoutes } from '@/modules/products/admin.routes';
 import { adminCategoryRoutes } from '@/modules/categories/admin.routes';
 import { adminReviewRoutes } from '@/modules/reviews/admin.routes';
@@ -36,36 +37,49 @@ import { adminInternRoutes } from '@/modules/intern/admin.routes';
  */
 export const adminRouter = Router();
 
-// ADMIN gets the full admin surface; STAFF gets in here too but the
-// frontend sidebar filters them down to their granted sections. The
-// staff-management endpoints are separately gated to ADMIN-only below.
+// ADMIN gets the full admin surface; STAFF gets in here too but
+// each sub-router checks its specific capability against
+// `User.permissions[]` (audit H1). The frontend sidebar already
+// filters items by capability — this layer is the API-side
+// enforcement that backs it. ADMIN bypasses every requireCapability
+// check by design.
 adminRouter.use(requireAuth, requireRole('ADMIN', 'STAFF'));
 
-adminRouter.use('/products', adminProductRoutes);
-adminRouter.use('/brands', adminBrandRoutes);
-adminRouter.use('/categories', adminCategoryRoutes);
-adminRouter.use('/reviews', adminReviewRoutes);
-adminRouter.use('/orders', adminOrderRoutes);
-adminRouter.use('/customers', adminCustomerRoutes);
+// Phase 11.3 (audit H1): per-sub-router capability gates. Each
+// sub-router is gated by the most permissive capability in the
+// domain — if STAFF needs that, they have read-or-write access.
+// Mutation handlers within each module can add inline tighter
+// checks (e.g. `requireCapability('orders.refund')` on the refund
+// endpoint) when they need to distinguish read vs write.
+adminRouter.use('/products', requireCapability('products.write'), adminProductRoutes);
+adminRouter.use('/brands', requireCapability('products.write'), adminBrandRoutes);
+adminRouter.use('/categories', requireCapability('categories.write'), adminCategoryRoutes);
+adminRouter.use('/reviews', requireCapability('reviews.moderate'), adminReviewRoutes);
+adminRouter.use('/orders', requireCapability('orders.read'), adminOrderRoutes);
+adminRouter.use('/customers', requireCapability('customers.read'), adminCustomerRoutes);
 // Staff management — ADMIN-only inner gate. Even if a STAFF user
 // somehow has `staff.manage` listed, we don't trust per-user grants
 // for the high-blast-radius "create more staff" action.
 adminRouter.use('/staff', requireRole('ADMIN'), adminStaffRoutes);
-adminRouter.use('/coupons', adminCouponRoutes);
-adminRouter.use('/shipping', adminShippingRoutes);
-adminRouter.use('/settings', adminSettingsRoutes);
-adminRouter.use('/audit-log', adminAuditRoutes);
-adminRouter.use('/webhooks', adminWebhookRoutes);
-adminRouter.use('/reports', adminReportRoutes);
-adminRouter.use('/notifications', adminNotificationRoutes);
-adminRouter.use('/email-templates', adminEmailTemplateRoutes);
-adminRouter.use('/custom-fields', adminCustomFieldRoutes);
-adminRouter.use('/payment-gateways', adminPaymentRoutes);
-adminRouter.use('/feature-flags', adminFeatureFlagRoutes);
-adminRouter.use('/business-rules', adminBusinessRuleRoutes);
-adminRouter.use('/pages', adminCmsRoutes);
-adminRouter.use('/blog', adminBlogRoutes);
-adminRouter.use('/content', adminContentRoutes);
+adminRouter.use('/coupons', requireCapability('coupons.write'), adminCouponRoutes);
+adminRouter.use('/shipping', requireCapability('shipping.write'), adminShippingRoutes);
+adminRouter.use('/settings', requireCapability('settings.write'), adminSettingsRoutes);
+adminRouter.use('/audit-log', requireCapability('audit.read'), adminAuditRoutes);
+adminRouter.use('/webhooks', requireCapability('webhooks.write'), adminWebhookRoutes);
+adminRouter.use('/reports', requireCapability('reports.read'), adminReportRoutes);
+adminRouter.use('/notifications', requireCapability('notifications.write'), adminNotificationRoutes);
+adminRouter.use('/email-templates', requireCapability('email-templates.write'), adminEmailTemplateRoutes);
+adminRouter.use('/custom-fields', requireCapability('custom-fields.write'), adminCustomFieldRoutes);
+adminRouter.use('/payment-gateways', requireCapability('payment-gateways.write'), adminPaymentRoutes);
+adminRouter.use('/feature-flags', requireCapability('feature-flags.write'), adminFeatureFlagRoutes);
+adminRouter.use('/business-rules', requireCapability('business-rules.write'), adminBusinessRuleRoutes);
+adminRouter.use('/pages', requireCapability('cms-pages.write'), adminCmsRoutes);
+adminRouter.use('/blog', requireCapability('blog.write'), adminBlogRoutes);
+adminRouter.use('/content', requireCapability('content.write'), adminContentRoutes);
+// Intern queue uses its own narrow capability `products.image-only`.
+// A regular STAFF with `products.write` can also reach it (via the
+// admin UI), so we also let that capability through. The intern
+// module already has internal scoping by `assignedInternId`.
 adminRouter.use('/intern', adminInternRoutes);
-adminRouter.use('/placements', adminPlacementsRoutes);
-adminRouter.use('/shelves', adminShelfRoutes);
+adminRouter.use('/placements', requireCapability('placements.write'), adminPlacementsRoutes);
+adminRouter.use('/shelves', requireCapability('products.write'), adminShelfRoutes);
