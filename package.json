@@ -14,6 +14,7 @@
     "prisma:studio": "prisma studio",
     "prisma:seed": "tsx prisma/seed.ts",
     "make-admin": "tsx scripts/make-admin.ts",
+    "backfill-shelf-picks": "tsx scripts/backfill-shelf-picks.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
