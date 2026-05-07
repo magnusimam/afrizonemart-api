@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { logger } from '@/infra/logger';
 import type { InitArgs, InitResult, PaymentGateway, WebhookOutcome } from './gateway';
 
@@ -122,7 +122,11 @@ export class GtSquadGateway implements PaymentGateway {
     if (!sig) return { status: 'IGNORED', reason: 'Missing x-squad-encrypted-body' };
 
     const expected = createHmac('sha512', this.secret).update(rawBody).digest('hex').toUpperCase();
-    if (sig.toUpperCase() !== expected) {
+    // Phase 11.3 (audit H2): constant-time compare. String === leaks
+    // the secret one character at a time via response-time variance.
+    const a = Buffer.from(sig.toUpperCase());
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
       logger.warn('squad.webhook_bad_signature');
       return { status: 'IGNORED', reason: 'Bad signature' };
     }

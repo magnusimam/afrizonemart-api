@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { logger } from '@/infra/logger';
 import type { InitArgs, InitResult, PaymentGateway, WebhookOutcome } from './gateway';
 
@@ -125,7 +125,11 @@ export class FlutterwaveGateway implements PaymentGateway {
     // admin to copy the same value into the `secretHash` credential.
     const sig = headers['verif-hash'] ?? headers['x-flw-secret-hash'];
     if (!sig) return { status: 'IGNORED', reason: 'Missing verif-hash header' };
-    if (sig !== this.secretHash) {
+    // Phase 11.3 (audit H2): constant-time compare. Plain `!==`
+    // leaks the shared secret character by character via timing.
+    const a = Buffer.from(sig);
+    const b = Buffer.from(this.secretHash);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
       logger.warn('flutterwave.webhook_bad_signature');
       return { status: 'IGNORED', reason: 'Bad signature' };
     }
