@@ -15,6 +15,7 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "make-admin": "tsx scripts/make-admin.ts",
     "backfill-shelf-picks": "tsx scripts/backfill-shelf-picks.ts",
+    "seed-shipping-rates": "tsx scripts/seed-shipping-rates.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

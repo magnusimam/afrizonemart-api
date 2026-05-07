@@ -76,6 +76,19 @@ const envSchema = z.object({
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_VERIFY_SID: z.string().optional(),
+
+  // Phase 11.2 — GIG Logistics shipping provider. When all three are
+  // set the GIG quote provider participates in checkout pricing,
+  // returning live "GIG Standard" / "GIG Express" rates alongside our
+  // manual rate card. Without them the provider returns no quotes and
+  // checkout falls through to the manual provider.
+  GIG_API_KEY: z.string().optional(),
+  GIG_USERNAME: z.string().optional(),
+  GIG_PASSWORD: z.string().optional(),
+  /// Default sender info for the quote — GIG needs an origin city to
+  /// compute pricing. Defaults to Lagos when unset.
+  GIG_ORIGIN_CITY: z.string().default('Lagos'),
+  GIG_ORIGIN_STATE: z.string().default('Lagos'),
 });
 
 // Bulk-upload CSVs can be larger than the default 1mb express body limit.

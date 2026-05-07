@@ -1,5 +1,6 @@
 import { prisma } from '@/infra/prisma';
 import { logger } from '@/infra/logger';
+import { gigShippingProvider } from './providers/gig-logistics';
 import { manualShippingProvider } from './providers/manual';
 import {
   DEFAULT_PRODUCT_WEIGHT_KG,
@@ -19,11 +20,14 @@ import {
  * additional entries below — same shape, different file.
  */
 
-/// Order matters: cheapest providers / fastest fallback last. Manual
-/// stays last so that even if a future carrier returns malformed
-/// quotes we always have at least one usable rate.
+/// Order matters: each provider's quotes are concatenated in this
+/// order, then re-sorted by price + ETA before returning. Manual
+/// stays last so even when carrier APIs go silent we always have
+/// something to render.
 const ACTIVE_PROVIDERS: ShippingProvider[] = [
-  // GIG, DHL, etc. land here in Phase 2.
+  // Phase 2 carriers — each is a no-op until its env credentials are set.
+  gigShippingProvider,
+  // DHL, Sendy, Kwik land here as additional entries.
   manualShippingProvider,
 ];
 
