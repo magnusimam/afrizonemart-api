@@ -107,6 +107,11 @@ model Product {
   comparePrice     Int?
   discountPercent  Int?
   origin           String? // 2-letter ISO country code, e.g. "NG", "KE"
+  /// Phase 11 — shipping weight in kilograms. Used by the shipping
+  /// quote algorithm to pick the right weight bracket. Nullable so
+  /// existing rows don't break; the quote engine treats null as
+  /// 0.5 kg by default (small package).
+  weightKg         Float?
   inStock          Boolean  @default(true)
   rating           Float    @default(0)
   reviewCount      Int      @default(0)
@@ -289,6 +294,11 @@ model Order {
   // placed before Phase 4 landed).
   shippingRateId String?
   shippingRate   ShippingRate? @relation(fields: [shippingRateId], references: [id])
+  /// Phase 11 — which shipping provider produced the quote that was
+  /// chosen at checkout. Defaults to 'manual' (our flat-rate-by-zone
+  /// engine). When carrier APIs land in Phase 2 this becomes 'gig',
+  /// 'dhl', etc., so fulfilment knows which carrier to actually book.
+  shippingProvider String? @default("manual")
 
   items       OrderItem[]
   events      OrderEvent[]
@@ -420,6 +430,12 @@ model ShippingZone {
   // Empty array = wildcard (matches any country); used together with
   // isDefault for the catch-all "Rest of world" zone.
   countries String[]
+  /// Phase 11 — optional sub-country zone restriction. When non-empty
+  /// the zone only matches when the destination city (case-insensitive)
+  /// is in this list AND the country also matches. Empty list = whole
+  /// country zone. Lets us carve out flagship cities (Lagos, Nairobi,
+  /// Joburg) with their own rates without splitting the country up.
+  cities    String[]       @default([])
   isDefault Boolean        @default(false)
   sortOrder Int            @default(0)
   rates     ShippingRate[]
@@ -438,6 +454,16 @@ model ShippingRate {
   priceAmount     Int          @default(0)
   // Free above this subtotal threshold. Null = never auto-free.
   freeAboveAmount Int?
+  /// Phase 11 — weight bracket this rate covers (in kilograms). The
+  /// rate matches when cart total weight falls in [minWeightKg,
+  /// maxWeightKg]. Null on either side = unbounded. Multiple bracket
+  /// rows per zone cover the weight curve.
+  minWeightKg     Float?
+  maxWeightKg     Float?
+  /// Phase 11 — delivery ETA shown to the customer at checkout.
+  /// Inclusive range; "3-5 days".
+  etaDaysMin      Int          @default(3)
+  etaDaysMax      Int          @default(7)
   isDefault       Boolean      @default(false)
   sortOrder       Int          @default(0)
   orders          Order[]

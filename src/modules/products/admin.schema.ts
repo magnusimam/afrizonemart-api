@@ -26,6 +26,10 @@ export const upsertProductBodySchema = z.object({
   price: z.number().int().nonnegative(),
   comparePrice: z.number().int().nonnegative().nullish(),
   origin: z.string().length(2).nullish(),
+  /// Phase 11 — shipping weight in kilograms. Drives the shipping
+  /// quote engine. Null is allowed; the quote engine substitutes
+  /// 0.5 kg by default.
+  weightKg: z.number().min(0).max(1000).nullish(),
   inStock: z.boolean().default(true),
   rating: z.number().min(0).max(5).default(0),
   reviewCount: z.number().int().nonnegative().default(0),
