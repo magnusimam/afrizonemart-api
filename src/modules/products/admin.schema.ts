@@ -48,6 +48,14 @@ export const adminListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(25),
   q: z.string().optional(),
   category: z.string().optional(),
+  /// 2-letter ISO country code matched against `Product.origin`.
+  /// Uppercased so `ng` / `Ng` / `NG` all work — admins typing it
+  /// into a URL bar shouldn't have to think about case.
+  origin: z
+    .string()
+    .length(2)
+    .optional()
+    .transform((v) => v?.toUpperCase()),
   inStock: z.enum(['true', 'false']).optional().transform((v) => (v === undefined ? undefined : v === 'true')),
   sort: z.enum(['newest', 'oldest', 'name-asc', 'price-desc']).default('newest'),
 });

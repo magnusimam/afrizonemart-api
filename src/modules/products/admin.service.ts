@@ -24,6 +24,7 @@ async function resolveCategoryId(slug: string | null | undefined): Promise<strin
 export async function adminListProducts(query: AdminListQuery) {
   const where: Prisma.ProductWhereInput = {};
   if (query.category) where.category = { slug: query.category };
+  if (query.origin) where.origin = query.origin;
   if (query.inStock !== undefined) where.inStock = query.inStock;
   if (query.q) {
     where.OR = [
