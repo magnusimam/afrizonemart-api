@@ -30,6 +30,37 @@ export interface GoogleSignInResult {
   refreshToken: string;
 }
 
+/// Phase 11.3 (audit H7): TTL for Google sign-in challenge. Long
+/// enough that a slow user finishing the One Tap flow doesn't hit
+/// expiry; short enough that captured challenges age out fast.
+const CHALLENGE_TTL_MS = 10 * 60 * 1000;
+
+export interface GoogleChallenge {
+  nonce: string;
+  expiresAt: string;
+}
+
+/**
+ * Phase 11.3 (audit H7) — issue a single-use OIDC nonce for the next
+ * Google sign-in attempt. The client passes this value to GIS via
+ * `google.accounts.id.initialize({ nonce })` so Google embeds it in
+ * the ID token; verifyIdToken then enforces the round-trip + a
+ * single-use consume against this row.
+ */
+export async function createGoogleChallenge(): Promise<GoogleChallenge> {
+  if (!env.GOOGLE_CLIENT_ID) {
+    throw HttpError.badRequest(
+      'Google sign-in is not configured. Set GOOGLE_CLIENT_ID on the API.',
+    );
+  }
+  const nonce = randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MS);
+  await prisma.googleAuthChallenge.create({
+    data: { nonce, expiresAt },
+  });
+  return { nonce, expiresAt: expiresAt.toISOString() };
+}
+
 /**
  * Verifies a Google ID token, finds-or-creates the user, and issues our
  * own JWT pair. Three flows:
@@ -45,8 +76,31 @@ export interface GoogleSignInResult {
  * Throws on token verification failure, missing email, or unverified
  * email.
  */
-export async function signInWithGoogle(idToken: string): Promise<GoogleSignInResult> {
+export async function signInWithGoogle(
+  idToken: string,
+  nonce: string,
+): Promise<GoogleSignInResult> {
   if (!idToken) throw HttpError.badRequest('Missing Google ID token.');
+  if (!nonce) throw HttpError.badRequest('Missing Google sign-in challenge.');
+
+  // Phase 11.3 (audit H7): atomic single-use consume of the
+  // server-issued challenge. `updateMany` with the unconsumed +
+  // unexpired predicate guarantees only one caller wins; a second
+  // request with the same nonce gets count=0 and is rejected. This
+  // is what makes a captured ID token unreplayable — the nonce row
+  // is gone the moment the first verify completes.
+  const consume = await prisma.googleAuthChallenge.updateMany({
+    where: {
+      nonce,
+      consumedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    data: { consumedAt: new Date() },
+  });
+  if (consume.count !== 1) {
+    logger.warn('auth.google.challenge_invalid', { nonce });
+    throw HttpError.unauthorized('Google sign-in challenge is invalid or expired.');
+  }
 
   let ticket;
   try {
@@ -65,6 +119,19 @@ export async function signInWithGoogle(idToken: string): Promise<GoogleSignInRes
   if (!payload) throw HttpError.unauthorized('Empty Google token payload.');
   if (!payload.email_verified) {
     throw HttpError.unauthorized('Google email is not verified.');
+  }
+  // Phase 11.3 (audit H7): nonce + azp checks. `nonce` ties the ID
+  // token to the challenge we just consumed; `azp` (authorized party,
+  // OIDC §2) ensures the token was minted for our own client_id —
+  // defends against a different Google project's token being replayed
+  // here even when both share an `aud`.
+  if (payload.nonce !== nonce) {
+    logger.warn('auth.google.nonce_mismatch');
+    throw HttpError.unauthorized('Google token nonce mismatch.');
+  }
+  if (payload.azp && payload.azp !== env.GOOGLE_CLIENT_ID) {
+    logger.warn('auth.google.azp_mismatch', { azp: payload.azp });
+    throw HttpError.unauthorized('Google token authorized party mismatch.');
   }
   const email = payload.email?.toLowerCase().trim();
   const sub = payload.sub;

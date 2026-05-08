@@ -892,6 +892,24 @@ model PasswordResetToken {
   @@index([expiresAt])
 }
 
+/// Phase 11.3 (audit H7) — anti-replay nonce for Google sign-in.
+/// Server-issued single-use challenge: client requests one before
+/// triggering the GIS popup, passes it as the OIDC `nonce` so Google
+/// embeds it in the ID token, and the verify endpoint atomically
+/// consumes the row. A captured ID token cannot be replayed because
+/// its nonce row is already marked consumed (or expired, 10-minute
+/// TTL). Cleanup of expired/consumed rows is best-effort — the
+/// unique index on `nonce` is what enforces single-use.
+model GoogleAuthChallenge {
+  id          String    @id @default(cuid())
+  nonce       String    @unique
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  consumedAt  DateTime?
+
+  @@index([expiresAt])
+}
+
 // ------------------------------------------------------------------
 // Phase 10.1 — Custom Field Registry (Principle #4 Schema-Driven Design)
 //

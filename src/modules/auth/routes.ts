@@ -7,6 +7,7 @@ import {
 } from '@/middleware/rate-limit';
 import {
   forgotPasswordHandler,
+  googleChallengeHandler,
   googleSignInHandler,
   loginHandler,
   logoutHandler,
@@ -28,6 +29,8 @@ authRoutes.get('/me', requireAuth, asyncHandler(meHandler));
 authRoutes.post('/forgot-password', authMutationLimiter, asyncHandler(forgotPasswordHandler));
 authRoutes.post('/reset-password', authStrictLimiter, asyncHandler(resetPasswordHandler));
 // Phase Auth.B/C — third-party sign-in
+// Phase 11.3 (audit H7): single-use nonce challenge for the GIS popup.
+authRoutes.post('/google/challenge', authMutationLimiter, asyncHandler(googleChallengeHandler));
 authRoutes.post('/google', authStrictLimiter, asyncHandler(googleSignInHandler));
 authRoutes.post('/phone/start', authMutationLimiter, asyncHandler(phoneStartHandler));
 authRoutes.post('/phone/verify', authStrictLimiter, asyncHandler(phoneVerifyHandler));

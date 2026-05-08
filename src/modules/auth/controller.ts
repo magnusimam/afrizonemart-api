@@ -18,7 +18,7 @@ import {
   requestPasswordReset,
   resetPassword,
 } from './service';
-import { signInWithGoogle } from './google.service';
+import { createGoogleChallenge, signInWithGoogle } from './google.service';
 import {
   startPhoneVerification,
   verifyPhoneAndSignIn,
@@ -136,16 +136,28 @@ export async function resetPasswordHandler(
   res.status(204).end();
 }
 
-const googleBody = z.object({ idToken: z.string().min(1) });
+const googleBody = z.object({
+  idToken: z.string().min(1),
+  // Phase 11.3 (audit H7): the single-use nonce the client requested
+  // from /api/auth/google/challenge before triggering GIS.
+  nonce: z.string().min(16).max(128),
+});
 
 export async function googleSignInHandler(
   req: Request,
   res: Response,
 ): Promise<void> {
-  const { idToken } = googleBody.parse(req.body);
-  const result = await signInWithGoogle(idToken);
+  const { idToken, nonce } = googleBody.parse(req.body);
+  const result = await signInWithGoogle(idToken, nonce);
   setRefreshCookie(res, result.refreshToken);
   res.json(buildResponse(result));
+}
+
+export async function googleChallengeHandler(
+  _req: Request,
+  res: Response,
+): Promise<void> {
+  res.json(await createGoogleChallenge());
 }
 
 const phoneStartBody = z.object({ phone: z.string().min(8).max(20) });
