@@ -10,12 +10,27 @@ const emailField = z
   .transform((s) => s.trim().toLowerCase())
   .pipe(z.string().email());
 
+/// Phase 11.3 (audit M6): strong-password validator. Rule chosen to
+/// block trivial dictionary words ("password", "12345678") without
+/// frustrating real users — must contain at least one character
+/// outside the lowercase-letter set (digit / uppercase / symbol).
+/// 8-char minimum stays; 128-char ceiling stays. Lower bound is the
+/// security floor, upper bound prevents bcrypt-cost amplification
+/// attacks (long input slows down hash).
+const STRONG_PASSWORD_MESSAGE =
+  'Password must include a number, a symbol, or an uppercase letter.';
+const passwordField = z
+  .string()
+  .min(8, 'Password must be at least 8 characters')
+  .max(128)
+  .refine(
+    (v) => /[0-9]/.test(v) || /[A-Z]/.test(v) || /[^A-Za-z0-9]/.test(v),
+    { message: STRONG_PASSWORD_MESSAGE },
+  );
+
 export const registerBodySchema = z.object({
   email: emailField,
-  password: z
-    .string()
-    .min(8, 'Password must be at least 8 characters')
-    .max(128),
+  password: passwordField,
   name: z.string().trim().min(1).max(100).optional(),
 });
 export type RegisterBody = z.infer<typeof registerBodySchema>;
@@ -33,10 +48,7 @@ export type ForgotPasswordBody = z.infer<typeof forgotPasswordBodySchema>;
 
 export const resetPasswordBodySchema = z.object({
   token: z.string().min(20).max(200),
-  password: z
-    .string()
-    .min(8, 'Password must be at least 8 characters')
-    .max(128),
+  password: passwordField,
 });
 export type ResetPasswordBody = z.infer<typeof resetPasswordBodySchema>;
 
