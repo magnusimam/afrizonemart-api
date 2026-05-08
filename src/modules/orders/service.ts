@@ -137,6 +137,32 @@ export async function placeOrder(userId: string, body: PlaceOrderBody) {
     });
 
     if (couponId) {
+      // Phase 11.3 (audit M1): close the coupon race. Two concurrent
+      // placeOrder calls can both pass `evaluateCoupon` outside the
+      // tx (the cart-time UX gate above), then both enter their tx
+      // and both increment usageCount past maxUses. The pessimistic
+      // row lock here serialises the contending transactions on the
+      // Coupon row; the SELECT-then-recheck inside the lock is what
+      // turns "two-passed-validation, both incremented" into
+      // "second one rejected with the same friendly message".
+      await tx.$queryRaw`SELECT id FROM "Coupon" WHERE id = ${couponId} FOR UPDATE`;
+      const locked = await tx.coupon.findUniqueOrThrow({
+        where: { id: couponId },
+      });
+      if (locked.maxUses != null && locked.usageCount >= locked.maxUses) {
+        throw HttpError.badRequest('This coupon has reached its usage limit.');
+      }
+      if (locked.maxUsesPerCustomer != null) {
+        const personalUses = await tx.couponRedemption.count({
+          where: { couponId, userId },
+        });
+        if (personalUses >= locked.maxUsesPerCustomer) {
+          throw HttpError.badRequest(
+            `You've already used this coupon ${personalUses} time${personalUses === 1 ? '' : 's'}.`,
+          );
+        }
+      }
+
       await tx.couponRedemption.create({
         data: {
           couponId,
