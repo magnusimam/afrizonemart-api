@@ -51,6 +51,15 @@ model User {
   // Refresh tokens are hashed before storage so a DB leak doesn't grant
   // session access. Null when the user has logged out everywhere.
   refreshTokenHash String?
+  /// Phase 11.3 (audit M7) — per-account lockout counters. Defends
+  /// against IP-rotating credential stuffing where the global rate
+  /// limiter (which keys on IP) doesn't see the same attacker hitting
+  /// one account from many addresses. Counter resets on successful
+  /// login, or rolls forward when the last failure was outside the
+  /// 15-minute window.
+  failedLoginAttempts Int       @default(0)
+  lastFailedLoginAt   DateTime?
+  lockedUntil         DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

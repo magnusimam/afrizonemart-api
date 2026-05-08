@@ -4,6 +4,7 @@ import type { User } from '@prisma/client';
 import { env } from '@/config/env';
 import { HttpError } from '@/middleware/error-handler';
 import { eventBus } from '@/infra/eventBus';
+import { logger } from '@/infra/logger';
 import { prisma } from '@/infra/prisma';
 import {
   signAccessToken,
@@ -108,15 +109,74 @@ export async function register(body: RegisterBody): Promise<AuthResult> {
   return issueTokens(user);
 }
 
+/// Phase 11.3 (audit M7) — lockout policy. 5 wrong passwords inside
+/// a 15-minute rolling window flips the account into a 15-minute
+/// soft-lock. The window resets on the next failure outside the
+/// window, and the whole counter resets on a successful login.
+const LOGIN_FAIL_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_FAIL_THRESHOLD = 5;
+const LOGIN_LOCK_DURATION_MS = 15 * 60 * 1000;
+
 export async function login(body: LoginBody): Promise<AuthResult> {
   const user = await findUserByEmail(body.email);
   if (!user) {
     throw HttpError.unauthorized('Invalid email or password');
   }
 
+  // Phase 11.3 (audit M7): check the lockout BEFORE bcrypt-comparing.
+  // Defends against IP-rotating credential stuffing — the global
+  // rate-limiter is keyed on IP, so a botnet hitting one account from
+  // many addresses bypasses it. Per-account counter catches that.
+  const now = new Date();
+  if (user.lockedUntil && user.lockedUntil > now) {
+    const minutes = Math.ceil((user.lockedUntil.getTime() - now.getTime()) / 60_000);
+    throw HttpError.unauthorized(
+      `Account temporarily locked due to too many failed sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+    );
+  }
+
   const ok = await bcrypt.compare(body.password, user.passwordHash);
   if (!ok) {
+    // Roll the failure counter. Reset to 1 if the last failure was
+    // outside the 15-min window — otherwise increment.
+    const withinWindow =
+      user.lastFailedLoginAt !== null &&
+      now.getTime() - user.lastFailedLoginAt.getTime() < LOGIN_FAIL_WINDOW_MS;
+    const newCount = withinWindow ? user.failedLoginAttempts + 1 : 1;
+    const newLockUntil =
+      newCount >= LOGIN_FAIL_THRESHOLD
+        ? new Date(now.getTime() + LOGIN_LOCK_DURATION_MS)
+        : null;
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginAttempts: newCount,
+        lastFailedLoginAt: now,
+        lockedUntil: newLockUntil,
+      },
+    });
+    if (newLockUntil) {
+      logger.warn('auth.login.account_locked', {
+        userId: user.id,
+        attempts: newCount,
+        lockedUntil: newLockUntil.toISOString(),
+      });
+    }
     throw HttpError.unauthorized('Invalid email or password');
+  }
+
+  // Successful login — clear the counter so a few off-by-one typos
+  // earlier in the day don't accumulate into a lock for someone who
+  // ultimately remembered their password.
+  if (user.failedLoginAttempts > 0 || user.lockedUntil !== null) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginAttempts: 0,
+        lastFailedLoginAt: null,
+        lockedUntil: null,
+      },
+    });
   }
 
   await eventBus.emit('user.logged_in', {
