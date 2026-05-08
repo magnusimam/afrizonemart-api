@@ -1,5 +1,6 @@
 import type { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
+import { isProduction } from '@/config/env';
 import { Sentry } from '@/infra/sentry';
 import { logger } from '@/infra/logger';
 
@@ -59,11 +60,22 @@ export const errorHandler: ErrorRequestHandler = (
   _next: NextFunction,
 ): void => {
   if (err instanceof ZodError) {
+    // Phase 11.3 (audit M4): keep the detailed field paths in
+    // server logs (useful for debugging "why does this 400") but
+    // don't echo the schema shape to the client in production —
+    // it helps an attacker craft valid payloads. Storefront UI
+    // only consumes the top-level message; no UX regression.
+    const fieldErrors = err.flatten().fieldErrors;
+    logger.warn('http.validation_error', {
+      method: req.method,
+      path: req.path,
+      fieldErrors,
+    });
     res.status(400).json({
       error: {
         code: 'VALIDATION_ERROR',
         message: 'Invalid request payload',
-        details: err.flatten().fieldErrors,
+        ...(isProduction ? {} : { details: fieldErrors }),
       },
     });
     return;
