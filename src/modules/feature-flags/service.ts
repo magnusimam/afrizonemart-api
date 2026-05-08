@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { FeatureFlag } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { logger } from '@/infra/logger';
+import { FEATURE_FLAG_REGISTRY } from './registry';
 
 /**
  * Phase 10.4 — Feature flag evaluation.
@@ -119,3 +120,50 @@ function stickyBucket(flagKey: string, userId: string): number {
 }
 
 logger.info('feature_flags.engine.loaded', { cacheTtlMs: CACHE_MS });
+
+/**
+ * Phase 10.4 (resilience pattern) — seed every code-registered flag
+ * into the DB the first time the API boots after it lands. Idempotent
+ * and insert-only: if an admin has already toggled or edited a flag,
+ * we don't touch it. Result: every `useFlag('<key>')` in the codebase
+ * is discoverable in `/admin/feature-flags` immediately on first
+ * deploy without the engineer having to pre-create rows by hand.
+ *
+ * Returns a small `{ created, skipped }` summary for the boot logger.
+ */
+export async function seedRegisteredFlags(): Promise<{
+  created: number;
+  skipped: number;
+}> {
+  if (FEATURE_FLAG_REGISTRY.length === 0) return { created: 0, skipped: 0 };
+
+  const keys = FEATURE_FLAG_REGISTRY.map((f) => f.key);
+  const existing = await prisma.featureFlag.findMany({
+    where: { key: { in: keys } },
+    select: { key: true },
+  });
+  const have = new Set(existing.map((r) => r.key));
+
+  const toCreate = FEATURE_FLAG_REGISTRY.filter((f) => !have.has(f.key));
+  if (toCreate.length > 0) {
+    await prisma.featureFlag.createMany({
+      data: toCreate.map((f) => ({
+        key: f.key,
+        name: f.name,
+        description: f.description,
+        defaultValue: f.defaultValue,
+        // isActive defaults to true at the schema level; targetingRules
+        // defaults to []. Don't override either.
+      })),
+      // Race-tolerant: another instance booting at the same time
+      // might insert ahead of us. unique violation on `key` is
+      // expected.
+      skipDuplicates: true,
+    });
+  }
+
+  return {
+    created: toCreate.length,
+    skipped: FEATURE_FLAG_REGISTRY.length - toCreate.length,
+  };
+}

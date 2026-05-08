@@ -25,6 +25,7 @@ import { fxRoutes } from '@/modules/fx/routes';
 import { categoryRoutes } from '@/modules/categories/routes';
 import { shelfRoutes } from '@/modules/shelves/routes';
 import { seedDefaultShelves } from '@/modules/shelves/service';
+import { seedRegisteredFlags } from '@/modules/feature-flags/service';
 import { blogRoutes } from '@/modules/blog/routes';
 import { contentRoutes } from '@/modules/content/routes';
 import { internRoutes } from '@/modules/intern/routes';
@@ -223,6 +224,22 @@ async function start() {
     }
   } catch (err) {
     logger.warn('shelves.seed_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  // Phase 10.4 (resilience pattern) — index every code-registered
+  // feature flag into the DB so it shows up in /admin/feature-flags
+  // on first boot. Insert-only; admin overrides survive.
+  try {
+    const r = await seedRegisteredFlags();
+    if (r.created > 0) {
+      logger.info('feature_flags.seeded', {
+        created: r.created,
+        skipped: r.skipped,
+      });
+    }
+  } catch (err) {
+    logger.warn('feature_flags.seed_failed', {
       error: err instanceof Error ? err.message : String(err),
     });
   }
