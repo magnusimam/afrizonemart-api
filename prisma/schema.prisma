@@ -573,6 +573,33 @@ model Webhook {
   @@index([isActive])
 }
 
+/// Phase 11.3 (audit H3) — inbound-webhook replay guard.
+///
+/// Indexed by (provider, bodyHash) — a SHA-256 of the raw webhook
+/// body. The service layer INSERTs a row inside the same transaction
+/// that flips the order; a unique-constraint violation means we've
+/// seen this exact webhook before and short-circuit the work.
+///
+/// Why hash the whole body instead of using `gatewayRef`:
+///  - Same gatewayRef can have multiple legitimate events (PENDING
+///    → SUCCEEDED). We only want to reject IDENTICAL deliveries.
+///  - Body mutation invalidates the gateway signature anyway, but
+///    this is defence-in-depth: even a signature-validation bug
+///    would still be caught by the dedupe.
+model InboundWebhookEvent {
+  id         String   @id @default(cuid())
+  /// 'squad', 'flutterwave', etc.
+  provider   String
+  /// 64-char SHA-256 hex of the raw webhook body bytes.
+  bodyHash   String
+  /// What we did with it — for audit / debugging.
+  outcome    String
+  receivedAt DateTime @default(now())
+
+  @@unique([provider, bodyHash])
+  @@index([receivedAt])
+}
+
 model WebhookDelivery {
   id            String    @id @default(cuid())
   webhookId     String

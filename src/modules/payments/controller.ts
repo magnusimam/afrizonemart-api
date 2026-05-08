@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type { AuthedRequest } from '@/middleware/auth';
@@ -38,14 +39,24 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
     status: 'IGNORED',
     reason: 'No active gateway recognised this delivery',
   };
+  let winningProvider: string | undefined;
   for (const gw of gateways) {
     const tryOutcome = await gw.parseWebhook(rawBody, headers);
     if (tryOutcome.status !== 'IGNORED') {
       outcome = tryOutcome;
+      winningProvider = gw.id;
       break;
     }
   }
-  const result = await applyWebhookOutcome(outcome);
+  // Phase 11.3 (audit H3): replay guard. SHA-256 the raw body bytes
+  // and pair with the provider id; the service writes a unique row
+  // before mutating Payment+Order so an identical replay can never
+  // re-flip the order. IGNORED outcomes (bad signature, wrong format,
+  // unrecognised) skip the guard so they never poison the dedup table.
+  const replayGuard = winningProvider
+    ? { provider: winningProvider, bodyHash: createHash('sha256').update(rawBody).digest('hex') }
+    : undefined;
+  const result = await applyWebhookOutcome(outcome, replayGuard);
   res.status(result.acknowledged ? 200 : 202).json(result);
 }
 

@@ -1,12 +1,38 @@
-import { env } from '@/config/env';
+import { Prisma } from '@prisma/client';
+import { env, isProduction } from '@/config/env';
 import { eventBus } from '@/infra/eventBus';
 import { logger } from '@/infra/logger';
 import { prisma } from '@/infra/prisma';
+import { decryptCredentials } from '@/lib/crypto-secret';
 import { HttpError } from '@/middleware/error-handler';
 import { logAudit } from '@/modules/audit/service';
 import type { PaymentGateway, WebhookOutcome } from './gateway';
 import { buildGateway } from './registry';
 import { StubGateway } from './stub-gateway';
+
+/// Phase 11.3 (audit M5): the stub gateway marks payments SUCCEEDED
+/// instantly without actually charging anyone. Falling back to it in
+/// production means a misconfigured prod silently lets customers
+/// "pay" without paying. Block the fallback in prod unless the
+/// operator explicitly opts in (ALLOW_STUB_GATEWAY=1) — staging that
+/// intentionally runs with NODE_ENV=production for parity testing.
+function assertStubAllowed(reason: string): void {
+  if (!isProduction || env.ALLOW_STUB_GATEWAY) return;
+  logger.error('payments.stub_blocked_in_prod', { reason });
+  throw new Error(
+    `No payment gateway is configured (${reason}). The stub gateway is disabled in production. Configure a provider in admin → Payment Gateways or set ALLOW_STUB_GATEWAY=1.`,
+  );
+}
+
+/// Phase 11.3 (audit H3): replay-guard for inbound payment webhooks.
+/// Caller passes the provider id + SHA-256 of the raw body; the service
+/// inserts an `InboundWebhookEvent` row inside the same transaction
+/// that mutates Payment+Order. Identical replays hit the unique
+/// `(provider, bodyHash)` index and are rejected as already-processed.
+export interface WebhookReplayGuard {
+  provider: string;
+  bodyHash: string;
+}
 
 const stub = new StubGateway();
 
@@ -61,7 +87,7 @@ export async function activeGateways(currency?: string): Promise<PaymentGateway[
       buildGateway({
         provider: cfg.provider,
         environment: cfg.environment,
-        credentials: cfg.credentials as Record<string, unknown>,
+        credentials: decryptCredentials(cfg.credentials as Record<string, unknown>),
       }),
     );
   }
@@ -74,6 +100,7 @@ export async function activeGateways(currency?: string): Promise<PaymentGateway[
       }),
     ];
   }
+  assertStubAllowed('no active gateway config and no SQUAD_* env');
   return [stub];
 }
 
@@ -90,7 +117,7 @@ export async function activeGateway(currency?: string): Promise<PaymentGateway> 
     return buildGateway({
       provider: cfg.provider,
       environment: cfg.environment,
-      credentials: cfg.credentials as Record<string, unknown>,
+      credentials: decryptCredentials(cfg.credentials as Record<string, unknown>),
     });
   }
   if (env.SQUAD_SECRET_KEY && env.SQUAD_ENVIRONMENT) {
@@ -100,6 +127,7 @@ export async function activeGateway(currency?: string): Promise<PaymentGateway> 
       credentials: { secretKey: env.SQUAD_SECRET_KEY },
     });
   }
+  assertStubAllowed('no active gateway config and no SQUAD_* env');
   return stub;
 }
 
@@ -115,7 +143,7 @@ async function gatewayById(id: string): Promise<PaymentGateway> {
       return buildGateway({
         provider: cfg.provider,
         environment: cfg.environment,
-        credentials: cfg.credentials as Record<string, unknown>,
+        credentials: decryptCredentials(cfg.credentials as Record<string, unknown>),
       });
     }
   }
@@ -127,6 +155,7 @@ async function gatewayById(id: string): Promise<PaymentGateway> {
       credentials: { secretKey: env.SQUAD_SECRET_KEY },
     });
   }
+  assertStubAllowed(`unknown or inactive gateway id "${id}"`);
   return stub;
 }
 
@@ -180,7 +209,10 @@ export async function initPayment(orderId: string, userId: string) {
  * Apply a webhook outcome to the matching Payment + Order. Idempotent —
  * if the order is already PAID we return 200 without re-emitting events.
  */
-export async function applyWebhookOutcome(outcome: WebhookOutcome): Promise<{ acknowledged: boolean; reason?: string }> {
+export async function applyWebhookOutcome(
+  outcome: WebhookOutcome,
+  replayGuard?: WebhookReplayGuard,
+): Promise<{ acknowledged: boolean; reason?: string }> {
   if (outcome.status === 'IGNORED') return { acknowledged: false, reason: outcome.reason };
 
   const payment = await prisma.payment.findUnique({
@@ -232,33 +264,73 @@ export async function applyWebhookOutcome(outcome: WebhookOutcome): Promise<{ ac
     }
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: outcome.status,
-        rawPayload: outcome.rawPayload,
-        settledAt: new Date(),
-      },
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Phase 11.3 (audit H3): record-then-mutate. If two identical
+      // webhook bodies hit the server concurrently, the second
+      // INSERT trips the (provider, bodyHash) unique index and
+      // rolls back the whole tx — including the Payment/Order
+      // mutations — so a replay can never re-flip an order.
+      if (replayGuard) {
+        await tx.inboundWebhookEvent.create({
+          data: {
+            provider: replayGuard.provider,
+            bodyHash: replayGuard.bodyHash,
+            outcome: outcome.status,
+          },
+        });
+      }
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: outcome.status,
+          rawPayload: outcome.rawPayload,
+          settledAt: new Date(),
+        },
+      });
+      if (outcome.status === 'SUCCEEDED' && payment.order.status === 'PENDING_PAYMENT') {
+        await tx.order.update({
+          where: { id: payment.orderId },
+          data: {
+            status: 'PAID',
+            paymentRef: outcome.gatewayRef,
+          },
+        });
+        await tx.orderEvent.create({
+          data: {
+            orderId: payment.orderId,
+            type: 'PAYMENT_RECEIVED',
+            payload: { gatewayRef: outcome.gatewayRef, amount: payment.amount } as object,
+            isCustomerVisible: true,
+          },
+        });
+      }
     });
-    if (outcome.status === 'SUCCEEDED' && payment.order.status === 'PENDING_PAYMENT') {
-      await tx.order.update({
-        where: { id: payment.orderId },
-        data: {
-          status: 'PAID',
-          paymentRef: outcome.gatewayRef,
+  } catch (err) {
+    if (
+      replayGuard &&
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002'
+    ) {
+      logger.warn('payments.webhook_replay_blocked', {
+        provider: replayGuard.provider,
+        bodyHash: replayGuard.bodyHash,
+        gatewayRef: outcome.gatewayRef,
+      });
+      await logAudit({
+        entityType: 'order',
+        entityId: payment.orderId,
+        action: 'payment.webhook_replay_blocked',
+        changes: {
+          provider: replayGuard.provider,
+          bodyHash: replayGuard.bodyHash,
+          gatewayRef: outcome.gatewayRef,
         },
       });
-      await tx.orderEvent.create({
-        data: {
-          orderId: payment.orderId,
-          type: 'PAYMENT_RECEIVED',
-          payload: { gatewayRef: outcome.gatewayRef, amount: payment.amount } as object,
-          isCustomerVisible: true,
-        },
-      });
+      return { acknowledged: true, reason: 'Replay (already processed)' };
     }
-  });
+    throw err;
+  }
 
   if (outcome.status === 'SUCCEEDED' && payment.order.status === 'PENDING_PAYMENT') {
     await eventBus.emit('order.paid', {

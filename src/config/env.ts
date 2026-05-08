@@ -21,6 +21,23 @@ const envSchema = z.object({
   JWT_SECRET: z
     .string()
     .min(32, 'JWT_SECRET must be at least 32 characters'),
+
+  // Phase 11.3 (audit H9) — symmetric key for at-rest secret
+  // encryption (payment gateway credentials, etc.). Hex (64 chars =
+  // 32 bytes) is the canonical form; any string ≥ 32 chars also
+  // works (we SHA-256 it to derive the AES key). Required in
+  // production; derived from JWT_SECRET in dev so existing setups
+  // keep working.
+  SECRETS_KEY: z.string().min(32).optional(),
+
+  // Phase 11.3 (audit M5) — opt-in escape hatch to allow the stub
+  // payment gateway in production. Default off; in production the
+  // payments service throws rather than silently falling back to the
+  // stub. Set to "1" only for staging-on-prod-NODE_ENV smoke tests.
+  ALLOW_STUB_GATEWAY: z
+    .enum(['0', '1'])
+    .default('0')
+    .transform((v) => v === '1'),
   JWT_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
 

@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '@/infra/prisma';
+import { decryptCredentials, encryptCredentials } from '@/lib/crypto-secret';
 import { HttpError } from '@/middleware/error-handler';
 import { listProviderDefinitions, getProviderDefinition } from './registry';
 
@@ -29,7 +30,11 @@ export function listAvailableProvidersHandler(_req: Request, res: Response): voi
 /** Strip credentials before returning — never leak secrets to clients. */
 function redact<T extends { credentials: unknown; provider: string }>(row: T) {
   const def = getProviderDefinition(row.provider);
-  const credentials = row.credentials as Record<string, unknown>;
+  // Phase 11.3 (audit H9): decrypt first so the "last 4" sanity-check
+  // suffix admins use to recognise their key still works after the
+  // encryption-at-rest cutover. Legacy plaintext rows pass through
+  // untouched.
+  const credentials = decryptCredentials(row.credentials as Record<string, unknown>);
   const out: Record<string, unknown> = {};
   if (def) {
     for (const f of def.credentialFields) {
@@ -69,7 +74,12 @@ export async function createGatewayConfigHandler(req: Request, res: Response): P
       throw HttpError.badRequest(`${def.displayName}: "${f.label}" is required.`);
     }
   }
-  const row = await prisma.paymentGatewayConfig.create({ data: body });
+  // Phase 11.3 (audit H9): encrypt credential values at rest. The
+  // envelope is stored as JSON inside the existing JSON column so no
+  // schema change is needed.
+  const row = await prisma.paymentGatewayConfig.create({
+    data: { ...body, credentials: encryptCredentials(body.credentials) },
+  });
   res.status(201).json(redact(row));
 }
 
@@ -81,7 +91,11 @@ export async function updateGatewayConfigHandler(req: Request, res: Response): P
 
   // Merge credentials so admin can update one field without re-typing all
   // of them. Empty strings are skipped (preserve current value).
-  let credentials = existing.credentials as Record<string, unknown>;
+  // Phase 11.3 (audit H9): decrypt the existing row first so we merge
+  // plaintexts, then re-encrypt the whole map. Result: any row touched
+  // by an admin save migrates from legacy plaintext to envelope form,
+  // even when the admin only edits one field.
+  let credentials = decryptCredentials(existing.credentials as Record<string, unknown>);
   if (body.credentials) {
     credentials = { ...credentials };
     for (const [k, v] of Object.entries(body.credentials)) {
@@ -99,7 +113,7 @@ export async function updateGatewayConfigHandler(req: Request, res: Response): P
       ...(body.priority !== undefined && { priority: body.priority }),
       ...(body.currencies !== undefined && { currencies: body.currencies }),
       ...(body.metadata !== undefined && { metadata: body.metadata }),
-      credentials,
+      credentials: encryptCredentials(credentials),
     },
   });
   res.json(redact(row));
