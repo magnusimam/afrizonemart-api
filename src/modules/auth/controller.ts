@@ -31,7 +31,16 @@ function refreshCookieOptions(): CookieOptions {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? 'none' : 'lax',
-    path: '/api/auth',
+    // Phase 11.3 (audit M8): widened from `/api/auth` to `/api`. The
+    // narrower path was fragile — a future endpoint outside `/api/auth`
+    // that wants to read or rotate the refresh cookie would silently
+    // get nothing back from the browser, and the bug wouldn't surface
+    // until production. `/api` keeps the cookie scoped to our API
+    // surface (browsers don't send it to `/`, `/static/*`, etc.) while
+    // making it available to every API route that legitimately needs
+    // it. Only `/api/auth/refresh` reads it today; the wider scope is
+    // future-proofing without expanding blast radius.
+    path: '/api',
     // Mirror JWT_REFRESH_EXPIRES_IN. We can't parse "30d" trivially; hard-cap
     // at 60 days which is generous and still bounded.
     maxAge: 60 * 24 * 60 * 60 * 1000,
