@@ -106,10 +106,20 @@ app.use(
 const VERCEL_PROJECT_PREVIEW =
   /^https:\/\/afrizonemart-[a-z0-9]+-imammagnus40-8846s-projects\.vercel\.app$/i;
 
-// In development we allow any localhost port — Next.js falls back to
-// 3001/3002/etc. when 3000 is taken and we shouldn't break the inner
-// loop over an env list.
-const LOCALHOST_ANY_PORT = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+// Phase 11.3 (audit M12): explicit dev allowlist. The earlier
+// `any-localhost-port` regex combined with `credentials: true` meant
+// any malicious page on any localhost port (a separate dev tool, an
+// installed VS Code extension webview, anything spinning up a port
+// during development) could make authenticated cross-origin calls.
+// We pin to the storefront's known ports — Next.js falls back to
+// 3001/3002 when 3000 is taken, so we list a small range explicitly
+// rather than the unbounded regex.
+const DEV_LOCALHOST_PORTS = new Set(['3000', '3001', '3002', '3737', '4000']);
+function isDevLocalhostOrigin(origin: string): boolean {
+  const m = /^http:\/\/(localhost|127\.0\.0\.1):(\d+)$/i.exec(origin);
+  if (!m) return false;
+  return DEV_LOCALHOST_PORTS.has(m[2]);
+}
 
 app.use(
   cors({
@@ -118,7 +128,7 @@ app.use(
       if (!origin) return cb(null, true);
       if (corsOrigins.includes(origin)) return cb(null, true);
       if (VERCEL_PROJECT_PREVIEW.test(origin)) return cb(null, true);
-      if (isDevelopment && LOCALHOST_ANY_PORT.test(origin)) return cb(null, true);
+      if (isDevelopment && isDevLocalhostOrigin(origin)) return cb(null, true);
       return cb(new Error(`CORS: origin "${origin}" not allowed`), false);
     },
     credentials: true,
@@ -127,23 +137,46 @@ app.use(
 
 // Static serving for the local-disk uploads backend. In production with
 // R2 this static handler is unused — assets come from R2's public URL.
+// Phase 11.3 (audit M11): `dotfiles: 'deny'` so a stray `.env` or
+// `.git` ending up in the uploads dir doesn't get served. `index:
+// false` and `redirect: false` prevent directory listings and trailing-
+// slash redirects to a parent. The risk is low (R2 in prod) but the
+// fix is one option object.
 if (env.UPLOADS_BACKEND === 'local') {
-  app.use('/uploads', express.static(path.resolve(env.UPLOADS_LOCAL_DIR)));
+  app.use(
+    '/uploads',
+    express.static(path.resolve(env.UPLOADS_LOCAL_DIR), {
+      dotfiles: 'deny',
+      index: false,
+      redirect: false,
+    }),
+  );
 }
-// 8mb body cap — bigger than typical JSON payloads, but big enough for
-// CSV bulk uploads of a few thousand rows. The `verify` callback also
-// stashes the raw body on the request so webhook signature handlers
-// (Squad's HMAC-SHA512 over the unmodified bytes, etc.) can verify
-// against exactly what the gateway signed.
+// Phase 11.3 (audit M10): per-path body limits. The previous global
+// 8mb cap applied to /api/auth/login too — an attacker could DoS the
+// auth endpoint with megabytes of garbage even before rate-limiting
+// kicks in. Tighter default (1mb) covers every real route. Bulk
+// admin endpoints get an 8mb override mounted BEFORE the global so
+// they parse first; once they set req.body, the global parser sees
+// it populated and skips. The `verify` callback stays on every
+// parser because webhook handlers depend on `rawBody` for signature
+// verification — the limit only changes, the rawBody capture does
+// not.
+const captureRawBody = (req: unknown, _res: unknown, buf: Buffer) => {
+  (req as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+};
 app.use(
-  express.json({
-    limit: '8mb',
-    verify: (req, _res, buf) => {
-      (req as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
-    },
-  }),
+  '/api/admin/products/bulk-upload',
+  express.json({ limit: '8mb', verify: captureRawBody }),
 );
-app.use(express.urlencoded({ extended: true, limit: '8mb' }));
+app.use(
+  '/api/admin/products/bulk',
+  express.json({ limit: '8mb', verify: captureRawBody }),
+);
+app.use(
+  express.json({ limit: '1mb', verify: captureRawBody }),
+);
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
 app.use(requestLogger);
 
