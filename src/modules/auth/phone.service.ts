@@ -153,6 +153,8 @@ function toPublic(user: User): PublicUser {
     id: user.id,
     email: user.email,
     name: user.name,
+    phone: user.phone ?? null,
+    avatarUrl: user.avatarUrl ?? null,
     role: user.role,
     jobTitle: user.jobTitle ?? null,
     permissions,

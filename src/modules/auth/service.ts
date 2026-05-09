@@ -37,6 +37,11 @@ export interface PublicUser {
   id: string;
   email: string;
   name: string | null;
+  /// E.164 phone, when the user has one (set via phone-OTP signup
+  /// or /account/profile). Null otherwise.
+  phone: string | null;
+  /// Avatar URL, typically populated by Google sign-in.
+  avatarUrl: string | null;
   role: string;
   jobTitle: string | null;
   /// Effective capability set the user has right now. Computed once at
@@ -67,6 +72,8 @@ function toPublic(user: User): PublicUser {
     id: user.id,
     email: user.email,
     name: user.name,
+    phone: user.phone ?? null,
+    avatarUrl: user.avatarUrl ?? null,
     role: user.role,
     jobTitle: user.jobTitle ?? null,
     permissions,
