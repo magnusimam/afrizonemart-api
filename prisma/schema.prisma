@@ -77,6 +77,11 @@ model User {
   /// Image-update submissions this user has approved or rejected
   /// (admin/reviewer role).
   reviewedSubmissions     ProductImageSubmission[] @relation("InternSubmissionReviewer")
+  /// Saved delivery addresses. The first one a customer creates is
+  /// implicitly default; subsequent edits to `isDefault` are exclusive
+  /// (only one address per user can be default at a time — enforced
+  /// in the addresses service, not the schema).
+  addresses               UserAddress[]            @relation("UserAddresses")
 
   @@index([email])
   @@index([phone])
@@ -944,6 +949,41 @@ model GoogleAuthChallenge {
   consumedAt  DateTime?
 
   @@index([expiresAt])
+}
+
+/// Saved delivery addresses on the customer account. Used by
+/// `/account/addresses` for management and by `/checkout/shipping`
+/// to populate the address picker. Only one address per user can
+/// be `isDefault: true` at a time — exclusivity is enforced in the
+/// addresses service (not the schema; Postgres can't express
+/// "unique-per-user-where-true" without a partial unique index,
+/// and we don't want to fight the seed-data flow).
+model UserAddress {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation("UserAddresses", fields: [userId], references: [id], onDelete: Cascade)
+  /// Recipient's full name on the parcel — may differ from the
+  /// account holder (gift orders, household members).
+  fullName    String
+  /// E.164 phone for the courier to reach the recipient.
+  phone       String
+  /// Free-form street + apartment line. Single field for simplicity;
+  /// future expansion to (line1 + line2) can split this column.
+  addressLine String
+  city        String
+  /// 2-letter ISO country code, matches the storefront's COUNTRIES list.
+  country     String
+  /// Optional admin-only label so the customer can name the address
+  /// ("Home", "Lagos office", etc.). Surfaced on the address card.
+  label       String?
+  /// Exactly one address per user can be true. The service ensures
+  /// exclusivity in a transaction.
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, isDefault])
 }
 
 // ------------------------------------------------------------------

@@ -10,6 +10,7 @@ import { connectDatabase, disconnectDatabase } from '@/infra/prisma';
 import { requestLogger } from '@/middleware/request-logger';
 import { errorHandler, notFoundHandler } from '@/middleware/error-handler';
 import { adminRouter } from '@/modules/admin/routes';
+import { addressRoutes } from '@/modules/addresses/routes';
 import { authRoutes } from '@/modules/auth/routes';
 import { cartRoutes } from '@/modules/cart/routes';
 import { healthRoutes } from '@/modules/health/routes';
@@ -187,6 +188,7 @@ app.use(requestLogger);
 // --------------------------------------------------------------
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/addresses', addressRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
