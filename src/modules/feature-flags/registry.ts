@@ -52,4 +52,11 @@ export const FEATURE_FLAG_REGISTRY: FeatureFlagDef[] = [
       'GSAP cart animation on the main Add-to-Cart button at /product/<slug> (PDP). T-shirt drops into a cart, cart rolls across, label fades back. Default ON. Flip to OFF as an instant kill-switch if the animation regresses on a specific browser, breaks add-to-cart, or shows a perf complaint — customers immediately see the plain "Add to Cart — {price}" button. No redeploy needed.',
     defaultValue: true,
   },
+  {
+    key: 'animated_card_add_to_cart_button',
+    name: 'Animated product-card Add to Cart button',
+    description:
+      'Same shirt-into-cart animation as the PDP button, scaled down for the small "Add to Cart" button on every product card across every shelf (homepage rows, shop pages, search, country pages, related products). Light theme to match the white card surface. Default ON. Flip to OFF independently of the PDP flag if cards perform poorly with many cards on screen at once, or if the animation feels redundant in browse mode — customers immediately see the plain "Add to Cart" button on cards while the PDP animation stays on. No redeploy needed.',
+    defaultValue: true,
+  },
 ];
