@@ -59,4 +59,11 @@ export const FEATURE_FLAG_REGISTRY: FeatureFlagDef[] = [
       'Same shirt-into-cart animation as the PDP button, scaled down for the small "Add to Cart" button on every product card across every shelf (homepage rows, shop pages, search, country pages, related products). Light theme to match the white card surface. Default ON. Flip to OFF independently of the PDP flag if cards perform poorly with many cards on screen at once, or if the animation feels redundant in browse mode — customers immediately see the plain "Add to Cart" button on cards while the PDP animation stays on. No redeploy needed.',
     defaultValue: true,
   },
+  {
+    key: 'floating_mobile_cart',
+    name: 'Floating mobile cart bubble',
+    description:
+      'Mobile-only floating cart button that appears once the cart has at least one item. Draggable to any edge of the screen, position persists across pages, taps route to /cart. Fixes the missing-cart-icon-on-mobile gap (the desktop header cart is hidden under md:). Default ON. Flip to OFF as a kill-switch if the bubble breaks scrolling on a specific device or covers something it shouldn\'t — customers fall back to the existing /cart link in the mobile menu drawer. No redeploy needed.',
+    defaultValue: true,
+  },
 ];
