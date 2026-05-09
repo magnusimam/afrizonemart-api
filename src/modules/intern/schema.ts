@@ -6,33 +6,37 @@ const altText = z.string().trim().max(200).nullable().optional();
 
 export const submitImagesBodySchema = z
   .object({
-    /// Image angles — all three are *individually* optional because
-    /// some products legitimately don't have a distinct front/back/side
-    /// (flat items, small bottles, etc.). The .superRefine below
-    /// enforces "at least one product image total" so submissions
-    /// can't be empty.
+    /// Every slot is individually optional. Some products legitimately
+    /// don't have all three angles (flat items, small bottles where
+    /// back == side, etc.) and the brand logo can be backfilled
+    /// separately via /admin/brand-logos. The superRefine below
+    /// enforces "at least one image total across all slots" so
+    /// submissions can't be empty.
     frontImageUrl: optionalUrl,
     backImageUrl: optionalUrl,
     sideImageUrl: optionalUrl,
-    /// Brand / company logo — still required so every approved
-    /// submission gives the storefront's "About the brand" section
-    /// something to render.
-    brandImageUrl: httpsUrl,
+    /// Brand / company logo. Loosened to optional 2026-05-09 so the
+    /// submit button enables on a single image — interns hitting
+    /// products that don't ship with a clear brand mark were
+    /// otherwise stuck. Approved submissions that arrive without a
+    /// brand logo just leave the storefront's "About the brand"
+    /// section empty for that product until a logo is backfilled.
+    brandImageUrl: optionalUrl,
     brandImageAlt: altText,
     /// Extra images beyond the named slots.
     additionalImages: z.array(httpsUrl).max(8).default([]),
   })
   .superRefine((b, ctx) => {
-    const productImageCount =
+    const total =
       (b.frontImageUrl ? 1 : 0) +
       (b.backImageUrl ? 1 : 0) +
       (b.sideImageUrl ? 1 : 0) +
+      (b.brandImageUrl ? 1 : 0) +
       (b.additionalImages?.length ?? 0);
-    if (productImageCount === 0) {
+    if (total === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message:
-          'Upload at least one product image (front, back, side, or extra).',
+        message: 'Upload at least one image.',
       });
     }
   });

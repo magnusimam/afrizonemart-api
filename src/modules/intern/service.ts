@@ -193,7 +193,7 @@ export async function submitImages(
       backImageUrl: body.backImageUrl || null,
       sideImageUrl: body.sideImageUrl || null,
       additionalImages: body.additionalImages,
-      brandImageUrl: body.brandImageUrl,
+      brandImageUrl: body.brandImageUrl || null,
       brandImageAlt: body.brandImageAlt ?? null,
       status: 'PENDING_REVIEW',
       payRate,
