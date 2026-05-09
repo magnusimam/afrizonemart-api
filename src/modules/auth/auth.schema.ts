@@ -52,3 +52,21 @@ export const resetPasswordBodySchema = z.object({
 });
 export type ResetPasswordBody = z.infer<typeof resetPasswordBodySchema>;
 
+/// Profile-update body for `PATCH /api/auth/me`. All fields are
+/// optional so the storefront can do partial updates (e.g. just the
+/// name). Email + password are NOT here — email needs a re-verify
+/// flow and password has its own /reset-password endpoint.
+export const updateMeBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional(),
+    /// Loose E.164-ish — leading +, then 7-15 digits. Stricter
+    /// validation happens at SMS-send time via Twilio.
+    phone: z
+      .string()
+      .trim()
+      .regex(/^\+\d{7,15}$/, 'Use E.164 format like +2348012345678')
+      .optional(),
+  })
+  .strict();
+export type UpdateMeBody = z.infer<typeof updateMeBodySchema>;
+

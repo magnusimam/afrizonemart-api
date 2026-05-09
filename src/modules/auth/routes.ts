@@ -20,6 +20,7 @@ import {
   refreshHandler,
   registerHandler,
   resetPasswordHandler,
+  updateMeHandler,
 } from './controller';
 
 export const authRoutes = Router();
@@ -31,6 +32,11 @@ authRoutes.post('/login', authStrictLimiter, asyncHandler(loginHandler));
 authRoutes.post('/refresh', asyncHandler(refreshHandler));
 authRoutes.post('/logout', requireAuth, asyncHandler(logoutHandler));
 authRoutes.get('/me', requireAuth, asyncHandler(meHandler));
+// PATCH /api/auth/me — partial profile update (name, phone). No
+// rate-limit middleware — requireAuth is the gate. Profile updates
+// are DB-write only and infrequent; spam-protection isn't worth the
+// false-positive risk for legitimate users.
+authRoutes.patch('/me', requireAuth, asyncHandler(updateMeHandler));
 authRoutes.post('/forgot-password', authPasswordResetLimiter, asyncHandler(forgotPasswordHandler));
 authRoutes.post('/reset-password', authStrictLimiter, asyncHandler(resetPasswordHandler));
 // Phase Auth.B/C — third-party sign-in

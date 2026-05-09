@@ -22,6 +22,7 @@ import type {
   LoginBody,
   RegisterBody,
   ResetPasswordBody,
+  UpdateMeBody,
 } from './auth.schema';
 
 const BCRYPT_ROUNDS = 12;
@@ -217,6 +218,46 @@ export async function getMe(userId: string): Promise<PublicUser> {
     throw HttpError.notFound('User not found');
   }
   return toPublic(user);
+}
+
+/**
+ * Update the signed-in user's mutable profile fields. Returns the
+ * fresh `PublicUser` shape so the storefront can refresh its auth
+ * store atomically. Throws if the user no longer exists or — for
+ * phone — if the value is already taken by another account
+ * (defends against a phone-number collision after a phone-OTP
+ * sign-up race).
+ */
+export async function updateMe(
+  userId: string,
+  body: UpdateMeBody,
+): Promise<PublicUser> {
+  if (Object.keys(body).length === 0) {
+    // Nothing to update; treat as a no-op. Return the current row.
+    return getMe(userId);
+  }
+
+  // Phone uniqueness pre-check — Prisma's @unique would throw P2002
+  // anyway, but a friendly message is better than a 500.
+  if (body.phone) {
+    const existing = await prisma.user.findUnique({
+      where: { phone: body.phone },
+      select: { id: true },
+    });
+    if (existing && existing.id !== userId) {
+      throw HttpError.conflict('That phone number is already in use.');
+    }
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      ...(body.name !== undefined && { name: body.name }),
+      ...(body.phone !== undefined && { phone: body.phone }),
+    },
+  });
+
+  return toPublic(updated);
 }
 
 export async function logout(userId: string): Promise<void> {

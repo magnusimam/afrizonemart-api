@@ -8,6 +8,7 @@ import {
   loginBodySchema,
   registerBodySchema,
   resetPasswordBodySchema,
+  updateMeBodySchema,
 } from './auth.schema';
 import {
   getMe,
@@ -17,6 +18,7 @@ import {
   register,
   requestPasswordReset,
   resetPassword,
+  updateMe,
 } from './service';
 import { createGoogleChallenge, signInWithGoogle } from './google.service';
 import {
@@ -103,6 +105,16 @@ export async function meHandler(
 ): Promise<void> {
   if (!req.user) throw HttpError.unauthorized();
   const user = await getMe(req.user.id);
+  res.json(user);
+}
+
+export async function updateMeHandler(
+  req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  if (!req.user) throw HttpError.unauthorized();
+  const body = updateMeBodySchema.parse(req.body);
+  const user = await updateMe(req.user.id, body);
   res.json(user);
 }
 
