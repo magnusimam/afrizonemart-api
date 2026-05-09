@@ -104,6 +104,29 @@ export const authPhoneOtpLimiter = rateLimit({
 });
 
 /**
+ * Google sign-in challenge: 60 per IP per hour. Pure DB write (creates
+ * a GoogleAuthChallenge row that auto-expires after 10min). The
+ * challenge fires every time `<GoogleSignInButton>` mounts — opening
+ * 3 tabs of /login is 3 challenges in seconds. Multiple users behind
+ * a shared IP hit this fast; previously this endpoint was on the
+ * 10/hr password-reset tier and burned through during smoke tests.
+ *
+ * Real cost is a few DB rows; the only failure mode of removing the
+ * limit entirely would be write-amplification flooding, which the
+ * 10-minute TTL bounds. 60/hr is a comfortable ceiling for the
+ * legitimate-use case while keeping a deterrent on flood attempts.
+ */
+export const authChallengeLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: jsonHandler(
+    'Too many sign-in attempts. Wait a moment and try again.',
+  ),
+});
+
+/**
  * @deprecated Use the cost-tier-specific limiter for the route. Kept
  * as an alias of `authPasswordResetLimiter` so existing callers don't
  * silently change behaviour mid-migration. New routes should pick

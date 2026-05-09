@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '@/middleware/async-handler';
 import { requireAuth } from '@/middleware/auth';
 import {
+  authChallengeLimiter,
   authPasswordResetLimiter,
   authPhoneOtpLimiter,
   authRegisterLimiter,
@@ -34,8 +35,11 @@ authRoutes.post('/forgot-password', authPasswordResetLimiter, asyncHandler(forgo
 authRoutes.post('/reset-password', authStrictLimiter, asyncHandler(resetPasswordHandler));
 // Phase Auth.B/C — third-party sign-in
 // Phase 11.3 (audit H7): single-use nonce challenge for the GIS popup.
-// Sits on the password-reset tier — DB-write only, no SMS cost.
-authRoutes.post('/google/challenge', authPasswordResetLimiter, asyncHandler(googleChallengeHandler));
+// 2026-05-09: bumped from password-reset tier (10/hr) to dedicated
+// challenge tier (60/hr). The challenge fires on every
+// <GoogleSignInButton> mount — multiple tabs / popup re-opens burn
+// through 10/hr fast for legitimate users on a shared IP.
+authRoutes.post('/google/challenge', authChallengeLimiter, asyncHandler(googleChallengeHandler));
 authRoutes.post('/google', authStrictLimiter, asyncHandler(googleSignInHandler));
 // SMS-cost tier — Twilio bills per message.
 authRoutes.post('/phone/start', authPhoneOtpLimiter, asyncHandler(phoneStartHandler));
