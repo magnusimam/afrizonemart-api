@@ -45,4 +45,11 @@ export const FEATURE_FLAG_REGISTRY: FeatureFlagDef[] = [
       'GSAP truck animation on the final Pay button at /checkout/payment. Default ON. Flip to OFF as an instant kill-switch if the animation regresses (browser-specific 3D bug, GSAP issue, perf complaint) — customers immediately see the plain "Pay {amount}" button instead, no redeploy needed.',
     defaultValue: true,
   },
+  {
+    key: 'animated_pdp_add_to_cart_button',
+    name: 'Animated PDP Add to Cart button',
+    description:
+      'GSAP cart animation on the main Add-to-Cart button at /product/<slug> (PDP). T-shirt drops into a cart, cart rolls across, label fades back. Default ON. Flip to OFF as an instant kill-switch if the animation regresses on a specific browser, breaks add-to-cart, or shows a perf complaint — customers immediately see the plain "Add to Cart — {price}" button. No redeploy needed.',
+    defaultValue: true,
+  },
 ];
