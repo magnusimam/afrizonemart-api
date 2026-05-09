@@ -82,6 +82,9 @@ model User {
   /// (only one address per user can be default at a time — enforced
   /// in the addresses service, not the schema).
   addresses               UserAddress[]            @relation("UserAddresses")
+  /// Customer wishlist — heart on PDP / product card adds a row,
+  /// removes it on toggle. Surfaces on /account/wishlist.
+  wishlist                WishlistItem[]           @relation("UserWishlist")
 
   @@index([email])
   @@index([phone])
@@ -157,6 +160,7 @@ model Product {
   assignedInternId   String?
   assignedIntern     User?                    @relation("ProductInternAssignee", fields: [assignedInternId], references: [id], onDelete: SetNull)
   imageSubmissions   ProductImageSubmission[]
+  wishlistedBy       WishlistItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -984,6 +988,23 @@ model UserAddress {
 
   @@index([userId])
   @@index([userId, isDefault])
+}
+
+/// One row per (user, product) the customer has favourited. The
+/// uniqueness constraint means an idempotent POST — a duplicate add
+/// is a no-op rather than a 409. Removing is a DELETE by productId
+/// scoped to the signed-in user.
+model WishlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("UserWishlist", fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId])
+  @@index([productId])
 }
 
 // ------------------------------------------------------------------
