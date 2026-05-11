@@ -127,6 +127,25 @@ export const authChallengeLimiter = rateLimit({
 });
 
 /**
+ * Share-as-image cutout: 20 per IP per hour. First request for any
+ * given product image hits the background-removal provider
+ * (remove.bg API ≈ $0.20/image when configured); every subsequent
+ * request for the same product is a R2 HEAD followed by a cached
+ * response. The limit is to deter a script-driven generation flood
+ * (which would burn AI credits on cold-cache products), not to
+ * gatekeep legitimate sharing.
+ */
+export const shareImageLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: jsonHandler(
+    'Share-image generation limit reached. Try again in an hour, or share the link instead.',
+  ),
+});
+
+/**
  * @deprecated Use the cost-tier-specific limiter for the route. Kept
  * as an alias of `authPasswordResetLimiter` so existing callers don't
  * silently change behaviour mid-migration. New routes should pick

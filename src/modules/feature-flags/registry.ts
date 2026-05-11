@@ -66,4 +66,11 @@ export const FEATURE_FLAG_REGISTRY: FeatureFlagDef[] = [
       'Mobile-only floating cart button that appears once the cart has at least one item. Draggable to any edge of the screen, position persists across pages, taps route to /cart. Fixes the missing-cart-icon-on-mobile gap (the desktop header cart is hidden under md:). Default ON. Flip to OFF as a kill-switch if the bubble breaks scrolling on a specific device or covers something it shouldn\'t — customers fall back to the existing /cart link in the mobile menu drawer. No redeploy needed.',
     defaultValue: true,
   },
+  {
+    key: 'share_as_image',
+    name: 'Share product as image (PDP)',
+    description:
+      'Adds a "Share as image" action to the PDP share menu. Generates a 1080×1080 PNG card with the product photo, name, price and Afrizonemart branding; mobile uses the native share sheet (WhatsApp / IG status / SMS), desktop downloads the PNG. Default OFF until smoke-tested in prod. Flip ON to enable; flip back to OFF as an instant kill-switch if the @vercel/og generation throws or the cutout provider (remove.bg / CF AI / Noop fallback) starts returning bad output — the existing link-share targets in the same popover remain available regardless. No redeploy needed.',
+    defaultValue: false,
+  },
 ];

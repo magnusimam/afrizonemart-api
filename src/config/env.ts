@@ -106,6 +106,13 @@ const envSchema = z.object({
   /// compute pricing. Defaults to Lagos when unset.
   GIG_ORIGIN_CITY: z.string().default('Lagos'),
   GIG_ORIGIN_STATE: z.string().default('Lagos'),
+
+  // Background-removal provider for the "Share as image" feature.
+  // When REMOVE_BG_API_KEY is set, the share-image cutout service uses
+  // remove.bg's API for a clean transparent PNG; otherwise it falls
+  // back to the Noop provider which returns the original image (the
+  // share card still renders, just without the floating-product look).
+  REMOVE_BG_API_KEY: z.string().optional(),
 });
 
 // Bulk-upload CSVs can be larger than the default 1mb express body limit.
