@@ -9,6 +9,7 @@ import {
 } from './admin.schema';
 import {
   adminBulkProductAction,
+  adminBulkRepricePreview,
   adminCreateProduct,
   adminDeleteProduct,
   adminGetProduct,
@@ -40,6 +41,16 @@ const bulkActionBodySchema = z.object({
     z.object({ kind: z.literal('delete') }),
     z.object({ kind: z.literal('set-in-stock'), value: z.boolean() }),
     z.object({ kind: z.literal('set-category'), categorySlug: z.string().min(1).nullable() }),
+    z.object({
+      kind: z.literal('reprice'),
+      mode: z.enum(['set', 'percent-up', 'percent-down']),
+      // For `set`: target price in NGN. For percent modes: the
+      // percent value (e.g. 5 = +5%). Capped to 1000 to catch
+      // obvious typos before they hit the DB.
+      value: z.number().finite().min(0).max(100_000_000),
+      applyTo: z.enum(['price', 'compare', 'both']).optional(),
+      reason: z.string().trim().max(500).optional(),
+    }),
   ]),
 });
 
@@ -101,7 +112,34 @@ export async function adminBulkActionHandler(
   res: Response,
 ): Promise<void> {
   const body = bulkActionBodySchema.parse(req.body);
-  res.json(await adminBulkProductAction(body.ids, body.action));
+  res.json(
+    await adminBulkProductAction(body.ids, body.action, req.user?.id ?? null),
+  );
+}
+
+const repricePreviewBodySchema = z.object({
+  ids: z
+    .array(z.string().min(1))
+    .min(1, 'Pick at least one product')
+    .max(500, 'Up to 500 products per preview'),
+  action: z.object({
+    kind: z.literal('reprice'),
+    mode: z.enum(['set', 'percent-up', 'percent-down']),
+    value: z.number().finite().min(0).max(100_000_000),
+    applyTo: z.enum(['price', 'compare', 'both']).optional(),
+    reason: z.string().trim().max(500).optional(),
+  }),
+});
+
+/// Returns before/after for each selected id WITHOUT writing.
+/// Feeds the rich Preview Re-price modal so the admin can review
+/// dozens of rows before committing.
+export async function adminBulkRepricePreviewHandler(
+  req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  const body = repricePreviewBodySchema.parse(req.body);
+  res.json(await adminBulkRepricePreview(body.ids, body.action));
 }
 
 /**

@@ -253,11 +253,25 @@ export interface BulkActionResult {
 export type BulkAction =
   | { kind: 'delete' }
   | { kind: 'set-in-stock'; value: boolean }
-  | { kind: 'set-category'; categorySlug: string | null };
+  | { kind: 'set-category'; categorySlug: string | null }
+  /// Re-price. `mode` chooses the math: `set` writes a fixed
+  /// value to every row, `percent-up` raises every current price
+  /// by N%, `percent-down` cuts every current price by N%.
+  /// `applyTo` (set mode only) lets the user write only the
+  /// price, only the compare-at, or both — defaults to price.
+  /// `reason` is optional and surfaces in the audit log.
+  | {
+      kind: 'reprice';
+      mode: 'set' | 'percent-up' | 'percent-down';
+      value: number;
+      applyTo?: 'price' | 'compare' | 'both';
+      reason?: string;
+    };
 
 export async function adminBulkProductAction(
   ids: string[],
   action: BulkAction,
+  actorId: string | null,
 ): Promise<BulkActionResult> {
   if (ids.length === 0) return { affected: 0, skipped: [] };
 
@@ -297,6 +311,46 @@ export async function adminBulkProductAction(
     return { affected: r.count, skipped: [] };
   }
 
+  if (action.kind === 'reprice') {
+    // Re-price is the only bulk action that goes through
+    // applyPriceChange() — we need a per-row computation (percent
+    // modes vary by current price) and per-row audit rows. A
+    // single updateMany would skip both.
+    const rows = await prisma.product.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, price: true, comparePrice: true },
+    });
+    const found = new Set(rows.map((r) => r.id));
+    const skipped: BulkActionResult['skipped'] = ids
+      .filter((id) => !found.has(id))
+      .map((id) => ({ id, reason: 'Product not found' }));
+
+    const applyTo = action.applyTo ?? 'price';
+    let affected = 0;
+    for (const row of rows) {
+      const input = computeRepriceInput(row, action, applyTo);
+      if (input === null) {
+        skipped.push({ id: row.id, reason: 'No-op for this row' });
+        continue;
+      }
+      try {
+        const r = await applyPriceChange(row.id, input, {
+          actorId,
+          source: 'BULK',
+          reason: action.reason ?? null,
+        });
+        if (!r.noop) affected++;
+        else skipped.push({ id: row.id, reason: 'No-op for this row' });
+      } catch (err) {
+        skipped.push({
+          id: row.id,
+          reason: err instanceof Error ? err.message : 'Update failed',
+        });
+      }
+    }
+    return { affected, skipped };
+  }
+
   // set-category
   const categoryId = await resolveCategoryId(action.categorySlug);
   const r = await prisma.product.updateMany({
@@ -304,4 +358,83 @@ export async function adminBulkProductAction(
     data: { categoryId },
   });
   return { affected: r.count, skipped: [] };
+}
+
+/// Server-side preview for the rich "Preview re-price" modal.
+/// Computes the new price for each selected id WITHOUT writing —
+/// the storefront renders before/after for confirmation, then
+/// calls the real bulk endpoint to commit. Reuses the same math
+/// as the commit path (`computeRepriceInput`) so what you see is
+/// exactly what you'll get.
+export interface RepricePreviewItem {
+  id: string;
+  name: string;
+  oldPrice: number;
+  newPrice: number;
+  oldComparePrice: number | null;
+  newComparePrice: number | null;
+  noop: boolean;
+}
+
+export async function adminBulkRepricePreview(
+  ids: string[],
+  action: Extract<BulkAction, { kind: 'reprice' }>,
+): Promise<{ items: RepricePreviewItem[] }> {
+  if (ids.length === 0) return { items: [] };
+  const rows = await prisma.product.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, name: true, price: true, comparePrice: true },
+    orderBy: { name: 'asc' },
+  });
+  const applyTo = action.applyTo ?? 'price';
+  const items: RepricePreviewItem[] = rows.map((row) => {
+    const computed = computeRepriceInput(row, action, applyTo);
+    const newPrice = computed?.price ?? row.price;
+    const newCompare =
+      computed?.comparePrice !== undefined
+        ? computed.comparePrice
+        : row.comparePrice;
+    return {
+      id: row.id,
+      name: row.name,
+      oldPrice: row.price,
+      newPrice,
+      oldComparePrice: row.comparePrice,
+      newComparePrice: newCompare,
+      noop:
+        computed === null ||
+        (newPrice === row.price && newCompare === row.comparePrice),
+    };
+  });
+  return { items };
+}
+
+/// Compute the `applyPriceChange` input for one row in a bulk
+/// reprice operation, or null if nothing should change. Shared
+/// between the commit path and the preview endpoint so what the
+/// preview shows is exactly what gets written.
+function computeRepriceInput(
+  row: { price: number; comparePrice: number | null },
+  action: Extract<BulkAction, { kind: 'reprice' }>,
+  applyTo: 'price' | 'compare' | 'both',
+): { price?: number; comparePrice?: number | null } | null {
+  if (action.mode === 'set') {
+    const target = Math.max(0, Math.round(action.value));
+    const out: { price?: number; comparePrice?: number | null } = {};
+    if (applyTo !== 'compare') out.price = target;
+    if (applyTo !== 'price') out.comparePrice = target === 0 ? null : target;
+    return Object.keys(out).length === 0 ? null : out;
+  }
+  // Percent modes always operate on price; compare-at is left
+  // alone. Re-running percent on a discounted product was
+  // surprising in admin testing — explicit `set` is the way to
+  // touch comparePrice.
+  const factor =
+    action.mode === 'percent-up'
+      ? 1 + action.value / 100
+      : 1 - action.value / 100;
+  if (!Number.isFinite(factor) || factor < 0) return null;
+  const newPrice = Math.max(0, Math.round(row.price * factor));
+  if (newPrice === row.price) return null;
+  return { price: newPrice };
 }

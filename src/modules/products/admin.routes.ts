@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '@/middleware/async-handler';
 import {
   adminBulkActionHandler,
+  adminBulkRepricePreviewHandler,
   adminBulkTemplateHandler,
   adminBulkUploadHandler,
   adminCreateProductHandler,
@@ -23,6 +24,10 @@ adminProductRoutes.get('/', asyncHandler(adminListProductsHandler));
 adminProductRoutes.post('/', asyncHandler(adminCreateProductHandler));
 adminProductRoutes.post('/bulk-upload', asyncHandler(adminBulkUploadHandler));
 adminProductRoutes.post('/bulk', asyncHandler(adminBulkActionHandler));
+adminProductRoutes.post(
+  '/bulk/reprice-preview',
+  asyncHandler(adminBulkRepricePreviewHandler),
+);
 adminProductRoutes.get('/bulk-template', adminBulkTemplateHandler);
 adminProductRoutes.get('/:id', asyncHandler(adminGetProductHandler));
 adminProductRoutes.patch('/:id', asyncHandler(adminUpdateProductHandler));
