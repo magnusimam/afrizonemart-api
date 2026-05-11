@@ -65,6 +65,12 @@ export async function getInternQueue(internId: string) {
       slug: true,
       name: true,
       brand: true,
+      // Price fields surfaced so the intern list view can render
+      // quick-edit cells without a second round-trip. Interns get
+      // products.write via the 20260511150000 migration so they
+      // can PATCH these via the existing admin endpoints.
+      price: true,
+      comparePrice: true,
       category: { select: { slug: true, name: true } },
       images: true,
       imageSubmissions: {
@@ -106,6 +112,8 @@ export async function getInternQueue(internId: string) {
       slug: p.slug,
       name: p.name,
       brand: p.brand,
+      price: p.price,
+      comparePrice: p.comparePrice,
       category: p.category,
       currentImages: p.images,
       latestSubmission: latest,
