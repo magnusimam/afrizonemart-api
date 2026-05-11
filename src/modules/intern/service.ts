@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
+import { deleteImagesByUrl } from '@/modules/uploads/cleanup';
 import type {
   BulkAssignBody,
   ClaimQueueBody,
@@ -160,6 +161,12 @@ export async function claimFromUnassignedPool(internId: string, body: ClaimQueue
  * Intern submits front/back/side images for a product they own. If a
  * REJECTED submission exists, this creates a fresh PENDING_REVIEW row
  * (history stays). Refuses if the product isn't in their bucket.
+ *
+ * Resubmit cleanup: when there's a prior REJECTED submission for the
+ * same (product, intern), any image URL on the old row that isn't
+ * present in the new submission is best-effort deleted from R2. This
+ * is the second main source of R2 orphans (the first is product
+ * deletes — handled in products/admin.service.ts).
  */
 export async function submitImages(
   internId: string,
@@ -187,12 +194,26 @@ export async function submitImages(
     );
   }
 
+  // Grab the most recent REJECTED submission's URLs so we can diff
+  // against the new ones below and clean up dropped files.
+  const previousRejected = await prisma.productImageSubmission.findFirst({
+    where: { productId, internId, status: 'REJECTED' },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      frontImageUrl: true,
+      backImageUrl: true,
+      sideImageUrl: true,
+      brandImageUrl: true,
+      additionalImages: true,
+    },
+  });
+
   // Snapshot the current pay rate. If admin changes the rate later,
   // this submission's pay stays locked to whatever was set at submit
   // time.
   const payRate = await getDefaultPayRate();
 
-  return prisma.productImageSubmission.create({
+  const created = await prisma.productImageSubmission.create({
     data: {
       productId,
       internId,
@@ -212,6 +233,36 @@ export async function submitImages(
       createdAt: true,
     },
   });
+
+  // Resubmit cleanup. Build the set of URLs the new submission keeps,
+  // then ask the cleanup helper to delete the previous-rejected ones
+  // that aren't in that set. Fire-and-forget — orphans on R2 failure
+  // get swept by the monthly orphan-scan cron.
+  if (previousRejected) {
+    const keptUrls = new Set<string>();
+    const add = (url: string | null | undefined) => {
+      if (typeof url === 'string' && url.length > 0) keptUrls.add(url);
+    };
+    add(body.frontImageUrl);
+    add(body.backImageUrl);
+    add(body.sideImageUrl);
+    add(body.brandImageUrl);
+    for (const extra of body.additionalImages) add(extra);
+
+    const droppedUrls: Array<string | null> = [];
+    const considerOld = (url: string | null) => {
+      if (url && !keptUrls.has(url)) droppedUrls.push(url);
+    };
+    considerOld(previousRejected.frontImageUrl);
+    considerOld(previousRejected.backImageUrl);
+    considerOld(previousRejected.sideImageUrl);
+    considerOld(previousRejected.brandImageUrl);
+    for (const extra of previousRejected.additionalImages) considerOld(extra);
+
+    void deleteImagesByUrl(droppedUrls);
+  }
+
+  return created;
 }
 
 /**

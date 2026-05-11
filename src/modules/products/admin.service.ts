@@ -3,12 +3,52 @@ import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
 import { validateAndNormalizeAttributes } from '@/modules/custom-fields/service';
 import { setProductPlacements } from '@/modules/placements/service';
+import { deleteImagesByUrl } from '@/modules/uploads/cleanup';
 import type {
   AdminListQuery,
   PartialProductBody,
   UpsertProductBody,
 } from './admin.schema';
 import { applyPriceChange } from './pricing.service';
+
+/// Collect every image URL referenced by a set of product ids
+/// across both the Product row itself (images[] + brandImageUrl)
+/// and every related ProductImageSubmission's 5 image slots.
+/// Used by delete paths for best-effort R2 cleanup.
+async function collectProductImageUrls(
+  productIds: string[],
+): Promise<string[]> {
+  if (productIds.length === 0) return [];
+  const [products, submissions] = await Promise.all([
+    prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { images: true, brandImageUrl: true },
+    }),
+    prisma.productImageSubmission.findMany({
+      where: { productId: { in: productIds } },
+      select: {
+        frontImageUrl: true,
+        backImageUrl: true,
+        sideImageUrl: true,
+        brandImageUrl: true,
+        additionalImages: true,
+      },
+    }),
+  ]);
+  const urls: Array<string | null> = [];
+  for (const p of products) {
+    urls.push(...p.images);
+    urls.push(p.brandImageUrl);
+  }
+  for (const s of submissions) {
+    urls.push(s.frontImageUrl);
+    urls.push(s.backImageUrl);
+    urls.push(s.sideImageUrl);
+    urls.push(s.brandImageUrl);
+    urls.push(...s.additionalImages);
+  }
+  return urls.filter((u): u is string => typeof u === 'string' && u.length > 0);
+}
 
 function discountPercent(price: number, comparePrice?: number | null): number | null {
   if (!comparePrice || comparePrice <= price) return null;
@@ -234,9 +274,15 @@ export async function adminDeleteProduct(id: string): Promise<void> {
       'Cannot delete a product that has been ordered. Mark it out-of-stock instead.',
     );
   }
+  // Collect every R2 URL we know about BEFORE the cascade nukes the
+  // submission rows — once Product is deleted, the join is gone.
+  const imageUrls = await collectProductImageUrls([id]);
   await prisma.cartItem.deleteMany({ where: { productId: id } });
   await prisma.review.deleteMany({ where: { productId: id } });
   await prisma.product.delete({ where: { id } });
+  // Best-effort R2 cleanup. Never throws (see uploads/cleanup.ts).
+  // Orphans on R2 failure get swept by the monthly orphan-scan cron.
+  void deleteImagesByUrl(imageUrls);
 }
 
 export interface BulkActionResult {
@@ -287,16 +333,23 @@ export async function adminBulkProductAction(
     });
     const referencedIds = new Set(referenced.map((r) => r.productId));
     const deletable = ids.filter((id) => !referencedIds.has(id));
+    // Same pre-collect-then-delete dance as the single-product path —
+    // gather R2 URLs before the cascade so we can sweep them after.
+    const imageUrls =
+      deletable.length > 0 ? await collectProductImageUrls(deletable) : [];
     if (deletable.length > 0) {
       await prisma.$transaction([
         prisma.cartItem.deleteMany({ where: { productId: { in: deletable } } }),
         prisma.review.deleteMany({ where: { productId: { in: deletable } } }),
         prisma.product.deleteMany({ where: { id: { in: deletable } } }),
       ]);
+      // Best-effort R2 cleanup. Fire-and-forget; monthly orphan-scan
+      // cron is the safety net for any R2 failures.
+      void deleteImagesByUrl(imageUrls);
     }
     return {
       affected: deletable.length,
-      skipped: [...referencedIds].map((id) => ({
+      skipped: Array.from(referencedIds).map((id) => ({
         id,
         reason: 'Has order history — mark out of stock instead',
       })),
