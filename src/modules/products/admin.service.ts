@@ -8,6 +8,7 @@ import type {
   PartialProductBody,
   UpsertProductBody,
 } from './admin.schema';
+import { applyPriceChange } from './pricing.service';
 
 function discountPercent(price: number, comparePrice?: number | null): number | null {
   if (!comparePrice || comparePrice <= price) return null;
@@ -78,7 +79,10 @@ export async function adminGetProduct(id: string) {
   return product;
 }
 
-export async function adminCreateProduct(body: UpsertProductBody) {
+export async function adminCreateProduct(
+  body: UpsertProductBody,
+  actorId: string | null,
+) {
   const existing = await prisma.product.findUnique({ where: { slug: body.slug }, select: { id: true } });
   if (existing) throw HttpError.conflict(`Slug "${body.slug}" already exists`);
 
@@ -108,6 +112,21 @@ export async function adminCreateProduct(body: UpsertProductBody) {
     },
     include: { category: true },
   });
+  // Seed the history with an "opening" row so the audit drawer
+  // shows the price the product launched at, not just deltas after
+  // first edit. oldPrice stays null — there was no prior value.
+  await prisma.productPriceChange.create({
+    data: {
+      productId: created.id,
+      oldPrice: null,
+      newPrice: body.price,
+      oldComparePrice: null,
+      newComparePrice: body.comparePrice ?? null,
+      changedById: actorId,
+      source: 'MANUAL',
+      reason: 'Product created',
+    },
+  });
   if (body.placements) {
     await setProductPlacements(
       created.id,
@@ -123,7 +142,11 @@ export async function adminCreateProduct(body: UpsertProductBody) {
   return created;
 }
 
-export async function adminUpdateProduct(id: string, body: PartialProductBody) {
+export async function adminUpdateProduct(
+  id: string,
+  body: PartialProductBody,
+  actorId: string | null,
+) {
   const existing = await prisma.product.findUnique({
     where: { id },
     select: { id: true, price: true, comparePrice: true, attributes: true },
@@ -143,10 +166,22 @@ export async function adminUpdateProduct(id: string, body: PartialProductBody) {
       ? undefined
       : await resolveCategoryId(body.categorySlug);
 
-  // Recompute discountPercent if either price moved.
-  const newPrice = body.price ?? existing.price;
-  const newCompare = body.comparePrice === undefined ? existing.comparePrice : body.comparePrice;
-  const computedDiscount = discountPercent(newPrice, newCompare);
+  // Price + comparePrice route through applyPriceChange separately
+  // so the audit log captures the change. Other fields update via
+  // the normal Product update below. discountPercent is owned by
+  // applyPriceChange — never write it from here directly.
+  if (body.price !== undefined || body.comparePrice !== undefined) {
+    await applyPriceChange(
+      id,
+      {
+        ...(body.price !== undefined && { price: body.price }),
+        ...(body.comparePrice !== undefined && {
+          comparePrice: body.comparePrice ?? null,
+        }),
+      },
+      { actorId, source: 'MANUAL' },
+    );
+  }
 
   const updated = await prisma.product.update({
     where: { id },
@@ -157,9 +192,6 @@ export async function adminUpdateProduct(id: string, body: PartialProductBody) {
       ...(body.shortDescription !== undefined && { shortDescription: body.shortDescription ?? null }),
       ...(body.description !== undefined && { description: body.description ?? null }),
       ...(body.ingredients !== undefined && { ingredients: body.ingredients ?? null }),
-      ...(body.price !== undefined && { price: body.price }),
-      ...(body.comparePrice !== undefined && { comparePrice: body.comparePrice ?? null }),
-      discountPercent: computedDiscount,
       ...(body.origin !== undefined && { origin: body.origin ?? null }),
       ...(body.weightKg !== undefined && { weightKg: body.weightKg ?? null }),
       ...(body.inStock !== undefined && { inStock: body.inStock }),

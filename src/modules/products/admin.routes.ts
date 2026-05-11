@@ -8,7 +8,9 @@ import {
   adminDeleteProductHandler,
   adminGetProductHandler,
   adminListProductsHandler,
+  adminListProductPriceHistoryHandler,
   adminUpdateProductHandler,
+  adminUpdateProductPriceHandler,
 } from './admin.controller';
 import {
   adminListBrandsHandler,
@@ -25,6 +27,14 @@ adminProductRoutes.get('/bulk-template', adminBulkTemplateHandler);
 adminProductRoutes.get('/:id', asyncHandler(adminGetProductHandler));
 adminProductRoutes.patch('/:id', asyncHandler(adminUpdateProductHandler));
 adminProductRoutes.delete('/:id', asyncHandler(adminDeleteProductHandler));
+adminProductRoutes.patch(
+  '/:id/price',
+  asyncHandler(adminUpdateProductPriceHandler),
+);
+adminProductRoutes.get(
+  '/:id/price-history',
+  asyncHandler(adminListProductPriceHistoryHandler),
+);
 
 /// Brand-scoped admin actions. Brands aren't a first-class entity — they
 /// live as a string on Product — but admins need to manage logo coverage

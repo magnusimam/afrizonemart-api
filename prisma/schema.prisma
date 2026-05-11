@@ -85,6 +85,9 @@ model User {
   /// Customer wishlist — heart on PDP / product card adds a row,
   /// removes it on toggle. Surfaces on /account/wishlist.
   wishlist                WishlistItem[]           @relation("UserWishlist")
+  /// Audit trail of price changes this user has made. Read-only
+  /// from the User side; writes happen via applyPriceChange().
+  priceChanges            ProductPriceChange[]     @relation("PriceChangedBy")
 
   @@index([email])
   @@index([phone])
@@ -161,6 +164,12 @@ model Product {
   assignedIntern     User?                    @relation("ProductInternAssignee", fields: [assignedInternId], references: [id], onDelete: SetNull)
   imageSubmissions   ProductImageSubmission[]
   wishlistedBy       WishlistItem[]
+  /// Append-only audit trail of every price change. Every write
+  /// path (inline edit, bulk re-price, CSV import, scheduled
+  /// flip, manual single-product save, revert) routes through
+  /// `applyPriceChange()` which appends a row here in the same
+  /// transaction as the Product update.
+  priceChanges       ProductPriceChange[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1005,6 +1014,58 @@ model WishlistItem {
   @@unique([userId, productId])
   @@index([userId])
   @@index([productId])
+}
+
+/// Where a price-change row came from. Matches every code path
+/// that calls `applyPriceChange()`. Used in the audit drawer to
+/// show "Bulk update by Magnus on 2026-05-11" vs "Scheduled
+/// rollback".
+enum PriceChangeSource {
+  /// Single-field inline edit on /admin/products list.
+  INLINE
+  /// Bulk re-price action (set/+%/-%).
+  BULK
+  /// CSV import.
+  CSV
+  /// Scheduled flip executed by the cron worker (PR 4).
+  SCHEDULED
+  /// Edited via the full /admin/products/[id] form.
+  MANUAL
+  /// "Undo" / "Revert to this row" from the history drawer.
+  REVERT
+}
+
+/// Append-only audit log of every price change. One row per
+/// price-mutating event; `applyPriceChange()` is the only writer
+/// (no direct inserts from controllers or scripts). Snapshots
+/// both fields (price + comparePrice) so the history is
+/// self-contained — readers don't need to look at the Product
+/// row to know what the price was at any point in time.
+model ProductPriceChange {
+  id               String            @id @default(cuid())
+  productId        String
+  product          Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Price before the change (NGN whole units). Null for the
+  /// very first row of a newly-created product — there was no
+  /// "old" value.
+  oldPrice         Int?
+  newPrice         Int
+  oldComparePrice  Int?
+  newComparePrice  Int?
+  /// User that triggered the change. Null only for SCHEDULED
+  /// rows (the cron has no acting user — admin who *scheduled*
+  /// it is on the ProductPriceSchedule row in PR 4).
+  changedById      String?
+  changedBy        User?             @relation("PriceChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+  source           PriceChangeSource
+  /// Optional free-form note ("Q3 supplier price hike",
+  /// "Black Friday opening price"). Surfaces in the history
+  /// drawer.
+  reason           String?
+  createdAt        DateTime          @default(now())
+
+  @@index([productId, createdAt])
+  @@index([changedById])
 }
 
 // ------------------------------------------------------------------
