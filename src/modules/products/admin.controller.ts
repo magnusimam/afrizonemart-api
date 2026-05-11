@@ -18,6 +18,7 @@ import {
 } from './admin.service';
 import { BULK_TEMPLATE_CSV, bulkUploadProducts } from './admin.bulk';
 import { applyPriceChange, listPriceHistory } from './pricing.service';
+import { PRICE_BULK_TEMPLATE_CSV, bulkUploadPrices } from './pricing.csv';
 
 const inlinePriceBodySchema = z
   .object({
@@ -105,6 +106,30 @@ export async function adminBulkUploadHandler(
 ): Promise<void> {
   const { csv } = bulkUploadBodySchema.parse(req.body);
   res.json(await bulkUploadProducts(csv));
+}
+
+/// Price-only CSV import. Looks each row up by slug, writes through
+/// applyPriceChange(source: CSV) so every change lands in the audit
+/// log attributed to the importing admin.
+export async function adminBulkUploadPricesHandler(
+  req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  const { csv } = bulkUploadBodySchema.parse(req.body);
+  res.json(await bulkUploadPrices(csv, req.user?.id ?? null));
+}
+
+export function adminBulkPriceTemplateHandler(
+  _req: AuthedRequest,
+  res: Response,
+): void {
+  res
+    .type('text/csv')
+    .header(
+      'Content-Disposition',
+      'attachment; filename="afrizonemart-prices-template.csv"',
+    )
+    .send(PRICE_BULK_TEMPLATE_CSV);
 }
 
 export async function adminBulkActionHandler(
