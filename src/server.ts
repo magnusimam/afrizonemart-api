@@ -29,6 +29,7 @@ import { wishlistRoutes } from '@/modules/wishlist/routes';
 import { shareImageRoutes } from '@/modules/share-image/routes';
 import { loyaltyRoutes } from '@/modules/loyalty/routes';
 import { startLoyaltyEarnSubscriber } from '@/modules/loyalty/subscriber';
+import { startLoyaltyMaintenanceCron } from '@/modules/loyalty/cron';
 import { seedDefaultShelves } from '@/modules/shelves/service';
 import { seedRegisteredFlags } from '@/modules/feature-flags/service';
 import { blogRoutes } from '@/modules/blog/routes';
@@ -255,6 +256,7 @@ async function start() {
   startWebhookDispatcher();
   startNotificationDispatcher();
   startLoyaltyEarnSubscriber();
+  startLoyaltyMaintenanceCron();
   startAbandonedCartCron();
   startScheduledBlogCron();
   app.listen(env.PORT, () => {
