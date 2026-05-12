@@ -70,7 +70,7 @@ export const FEATURE_FLAG_REGISTRY: FeatureFlagDef[] = [
     key: 'share_as_image',
     name: 'Share product as image (PDP)',
     description:
-      'Adds a "Share as image" action to the PDP share menu. Generates a 1080×1080 PNG card with the product photo, name, price and Afrizonemart branding; mobile uses the native share sheet (WhatsApp / IG status / SMS), desktop downloads the PNG. Default OFF until smoke-tested in prod. Flip ON to enable; flip back to OFF as an instant kill-switch if the @vercel/og generation throws or the cutout provider (remove.bg / CF AI / Noop fallback) starts returning bad output — the existing link-share targets in the same popover remain available regardless. No redeploy needed.',
+      'Adds a "Share as image" item to the PDP share popover. Generates a 1080x1080 PNG card (navy + amber, product photo + price + brand) for sharing to WhatsApp / IG status / SMS; desktop downloads the PNG instead. Default OFF until smoke-tested in prod. Flip to OFF as an instant kill-switch if generation throws — the link-share targets in the same popover remain available. No redeploy needed.',
     defaultValue: false,
   },
 ];

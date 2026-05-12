@@ -27,6 +27,7 @@ import { adminShelfRoutes } from '@/modules/shelves/admin.routes';
 import { adminBlogRoutes } from '@/modules/blog/admin.routes';
 import { adminContentRoutes } from '@/modules/content/admin.routes';
 import { adminInternRoutes } from '@/modules/intern/admin.routes';
+import { adminLoyaltyRoutes } from '@/modules/loyalty/admin.routes';
 
 /**
  * Composes every domain module's admin surface under a single auth gate.
@@ -72,6 +73,7 @@ adminRouter.use('/email-templates', requireCapability('email-templates.write'), 
 adminRouter.use('/custom-fields', requireCapability('custom-fields.write'), adminCustomFieldRoutes);
 adminRouter.use('/payment-gateways', requireCapability('payment-gateways.write'), adminPaymentRoutes);
 adminRouter.use('/feature-flags', requireCapability('feature-flags.write'), adminFeatureFlagRoutes);
+adminRouter.use('/loyalty', requireCapability('loyalty.read'), adminLoyaltyRoutes);
 adminRouter.use('/business-rules', requireCapability('business-rules.write'), adminBusinessRuleRoutes);
 adminRouter.use('/pages', requireCapability('cms-pages.write'), adminCmsRoutes);
 adminRouter.use('/blog', requireCapability('blog.write'), adminBlogRoutes);

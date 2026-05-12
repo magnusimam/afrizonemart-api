@@ -88,6 +88,9 @@ model User {
   /// Audit trail of price changes this user has made. Read-only
   /// from the User side; writes happen via applyPriceChange().
   priceChanges            ProductPriceChange[]     @relation("PriceChangedBy")
+  /// Continental Rewards account — 1:1, auto-created on first
+  /// paid order. Null until enrollment.
+  loyaltyAccount          LoyaltyAccount?          @relation("UserLoyalty")
 
   @@index([email])
   @@index([phone])
@@ -1334,4 +1337,148 @@ model ProductImageSubmission {
   @@index([internId, status])
   @@index([productId])
   @@index([status, createdAt])
+}
+
+// ------------------------------------------------------------------
+// Continental Rewards — Afrizone Coin loyalty program
+// (Tracker #44, design locked 2026-05-12)
+//
+// One Account per User, created on the first PAID order. Coin balance
+// is *cached* on the Account row for fast reads but the *source of
+// truth is the ledger sum* — any time a Transaction row lands, the
+// cache is recomputed in the same DB transaction.
+//
+// The ledger is append-only. No `UPDATE` or `DELETE` queries on
+// LoyaltyTransaction rows anywhere in the codebase. Refunds, expiries,
+// admin adjustments are all *new* rows with the appropriate type.
+//
+// LoyaltyConfig is a singleton (one row, `id = 1`) holding every
+// admin-tunable knob. Each change writes to the central AuditLog.
+// ------------------------------------------------------------------
+
+enum LoyaltyTier {
+  /// Continental Blue — entry tier. Every customer who has made
+  /// a first paid order is at least Blue.
+  BLUE
+  /// Continental Gold — rolling 12-month spend ≥ tier2Gold threshold.
+  GOLD
+  /// Continental VIP — rolling 12-month spend ≥ tier3Vip threshold.
+  VIP
+  /// Continental Ambassador — rolling 12-month spend ≥ tier4Ambassador threshold.
+  AMBASSADOR
+  /// Continental Dorime — rolling 12-month spend ≥ tier5Dorime threshold.
+  DORIME
+}
+
+enum LoyaltyTransactionType {
+  /// One-time bonus on auto-enrollment (first paid order). Locked by
+  /// `LoyaltyAccount.enrolledAt`; cannot double-fire.
+  WELCOME_BONUS
+  /// Coins earned for a paid order, per the tier's per-order rate.
+  EARN
+  /// Coins applied to an order at checkout. delta < 0.
+  REDEEM
+  /// Reversal when a previously-earning order is refunded. delta < 0.
+  /// `causeOrderId` points at the refunded order.
+  REFUND_REVERSAL
+  /// Reversal of a REDEEM when its order is refunded — returns the
+  /// coins the customer paid with. delta > 0.
+  REDEEM_REFUND
+  /// Cron-issued expiry of coins past their `expiresAt`. delta < 0.
+  /// FIFO: oldest non-expired coins debited first.
+  EXPIRY
+  /// Manual admin intervention (correction, goodwill credit, fraud
+  /// clawback). `causeAdminId` + `reason` required.
+  ADMIN_ADJUSTMENT
+}
+
+/// One row per customer enrolled in the loyalty program. Auto-
+/// created on first paid order. `coinBalance` and `currentTier` are
+/// caches recomputed from the ledger on every mutation; the
+/// `lifetime*` fields are convenience counters for analytics +
+/// the rewards-page UI.
+model LoyaltyAccount {
+  id                    String                 @id @default(cuid())
+  userId                String                 @unique
+  user                  User                   @relation("UserLoyalty", fields: [userId], references: [id], onDelete: Cascade)
+  /// Cached current coin balance. Source of truth is the ledger.
+  coinBalance           Int                    @default(0)
+  /// Cached tier. Recomputed daily by the cron based on rolling
+  /// 12-month spend, and on-write when a paying order lands.
+  currentTier           LoyaltyTier            @default(BLUE)
+  /// Lifetime totals — only ever grow. Used on /account/rewards
+  /// and for admin analytics.
+  lifetimeCoinsEarned   Int                    @default(0)
+  lifetimeCoinsRedeemed Int                    @default(0)
+  /// Locked once. Welcome-bonus checks this — never re-fires.
+  enrolledAt            DateTime               @default(now())
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  transactions          LoyaltyTransaction[]
+
+  @@index([currentTier])
+}
+
+/// Append-only ledger. `applyLoyaltyTransaction()` in the service is
+/// the only writer. balanceAfter is recorded on every row so the
+/// rewards page can render a running balance without re-summing the
+/// whole history each render. `expiresAt` is set on `WELCOME_BONUS`
+/// and `EARN` rows only; `expiredAt` is set when the expiry cron
+/// issues an `EXPIRY` row for these.
+model LoyaltyTransaction {
+  id            String                 @id @default(cuid())
+  accountId     String
+  account       LoyaltyAccount         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  /// Positive = added to balance, negative = removed.
+  delta         Int
+  /// Running balance after this row landed. Same value as
+  /// `LoyaltyAccount.coinBalance` at the moment this row was
+  /// inserted.
+  balanceAfter  Int
+  type          LoyaltyTransactionType
+  /// Optional: order that caused this row. Set for EARN, REDEEM,
+  /// REFUND_REVERSAL, REDEEM_REFUND.
+  causeOrderId  String?
+  /// Optional: admin user that triggered this row. Set for
+  /// ADMIN_ADJUSTMENT only.
+  causeAdminId  String?
+  /// Free-form note. Required for ADMIN_ADJUSTMENT (audit). Optional
+  /// elsewhere.
+  reason        String?
+  /// Set on EARN + WELCOME_BONUS rows. Null on everything else.
+  /// When the expiry cron runs, rows where `expiresAt < now()` AND
+  /// `expiredAt IS NULL` are eligible for an `EXPIRY` ledger entry.
+  expiresAt     DateTime?
+  /// Set on EARN + WELCOME_BONUS rows after the expiry cron has
+  /// issued a matching EXPIRY row for them. Prevents double-expiry.
+  expiredAt     DateTime?
+  createdAt     DateTime               @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([accountId, type, expiresAt])
+  @@index([causeOrderId])
+}
+
+/// Singleton row (id = 1) holding every admin-tunable knob for the
+/// loyalty program. Updates write to AuditLog via the admin endpoint.
+model LoyaltyConfig {
+  id                       Int      @id @default(1)
+  // ---- Earn config ----
+  baseEarnPerOrder         Int      @default(5)
+  tierMultiplier           Float    @default(2.0)
+  welcomeBonusCoins        Int      @default(20)
+  // ---- Tier thresholds (NGN, rolling 12-month spend) ----
+  tier2GoldThreshold       Int      @default(80000)
+  tier3VipThreshold        Int      @default(500000)
+  tier4AmbassadorThreshold Int      @default(1000000)
+  tier5DorimeThreshold     Int      @default(10000000)
+  // ---- Coin economics ----
+  coinValueNgn             Int      @default(33)
+  maxOrderRedeemPercent    Int      @default(50)
+  minRedeemCoins           Int      @default(30)
+  // ---- Expiry / window ----
+  coinExpiryMonths         Int      @default(2)
+  spendWindowMonths        Int      @default(12)
+  updatedAt                DateTime @updatedAt
+  updatedById              String?
 }

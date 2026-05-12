@@ -50,7 +50,10 @@ export type Capability =
   | 'reports.read'
   | 'audit.read'
   | 'uploads.write'
-  | 'settings.write';
+  | 'settings.write'
+  // Loyalty (Continental Rewards)
+  | 'loyalty.read'
+  | 'loyalty.write';
 
 export type StaffRole = 'CUSTOMER' | 'SELLER' | 'ADMIN' | 'STAFF';
 
@@ -89,6 +92,9 @@ export const CAPABILITY_LABELS: Record<Capability, { domain: string; label: stri
   'audit.read': { domain: 'Operations', label: 'View admin audit log' },
   'uploads.write': { domain: 'Operations', label: 'Upload images & assets' },
   'settings.write': { domain: 'Operations', label: 'Edit store settings' },
+  // Loyalty (Continental Rewards)
+  'loyalty.read': { domain: 'Loyalty', label: 'View Continental Rewards accounts & transactions' },
+  'loyalty.write': { domain: 'Loyalty', label: 'Edit Continental Rewards config + manual coin adjustments' },
 };
 
 export const ALL_CAPABILITIES: Capability[] = Object.keys(CAPABILITY_LABELS) as Capability[];
