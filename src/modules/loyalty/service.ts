@@ -163,6 +163,15 @@ export interface ApplyTransactionInput {
   expiresAt?: Date | null;
 }
 
+/// Transaction-client shape produced by THIS codebase's prisma
+/// instance, which uses `$extends`. Extracting it via the callback
+/// parameter type of `$transaction` keeps us compatible regardless
+/// of which extensions are layered on. Plain `Prisma.TransactionClient`
+/// doesn't match the extended client shape, hence the indirection.
+export type AppTx = Parameters<
+  Parameters<typeof prisma.$transaction>[0]
+>[0];
+
 /// THE ONLY WRITER to `LoyaltyTransaction`. Wraps the row insert +
 /// account-balance cache + lifetime counter update in a single DB
 /// transaction. Locks the account row to make concurrent
@@ -173,7 +182,15 @@ export interface ApplyTransactionInput {
 ///     `getOrCreateAccountForUser` first)
 ///   - debit would take balance negative
 ///   - ADMIN_ADJUSTMENT without `causeAdminId` + `reason`
-export async function applyLoyaltyTransaction(input: ApplyTransactionInput) {
+///
+/// Pass `tx` when composing inside an outer transaction (e.g.
+/// placeOrder atomically deducting coins as the order is created).
+/// Omit `tx` when this is the only DB write needed — the helper
+/// opens its own $transaction.
+export async function applyLoyaltyTransaction(
+  input: ApplyTransactionInput,
+  tx?: AppTx,
+) {
   if (input.type === LoyaltyTransactionType.ADMIN_ADJUSTMENT) {
     if (!input.causeAdminId || !input.reason || input.reason.trim() === '') {
       throw HttpError.badRequest(
@@ -182,7 +199,19 @@ export async function applyLoyaltyTransaction(input: ApplyTransactionInput) {
     }
   }
 
-  return prisma.$transaction(async (tx) => {
+  if (tx) {
+    return doApplyLoyaltyTransaction(tx, input);
+  }
+  return prisma.$transaction((inner) => doApplyLoyaltyTransaction(inner, input));
+}
+
+/// Inner worker called either by the public helper (opening its own
+/// tx) or directly by a composed-tx caller. Same logic either way;
+/// the wrapping decides whether to open a new transaction.
+async function doApplyLoyaltyTransaction(
+  tx: AppTx,
+  input: ApplyTransactionInput,
+) {
     // Lock the account row. Postgres handles this via SELECT … FOR
     // UPDATE; Prisma exposes it via $queryRaw — but findFirst
     // followed by a same-transaction write achieves the equivalent
@@ -261,5 +290,55 @@ export async function applyLoyaltyTransaction(input: ApplyTransactionInput) {
         expiresAt: input.expiresAt ?? null,
       },
     });
+}
+
+/// Validate a coin-redemption request against the live config and
+/// the user's current balance. Returns the validated coin count
+/// and the NGN value that should be applied to the order total.
+///
+/// Throws `HttpError.badRequest` with a clear customer-facing
+/// message on any rule violation. Callers (placeOrder) call this
+/// BEFORE opening their tx so the validation cost doesn't lock
+/// rows.
+export async function validateCoinRedemption(input: {
+  userId: string;
+  coinsRequested: number;
+  productSubtotalNgn: number;
+}): Promise<{ coins: number; ngnDiscount: number }> {
+  const { userId, coinsRequested, productSubtotalNgn } = input;
+  if (coinsRequested <= 0) return { coins: 0, ngnDiscount: 0 };
+
+  const cfg = await getLoyaltyConfig();
+  if (coinsRequested < cfg.minRedeemCoins) {
+    throw HttpError.badRequest(
+      `Minimum redemption is ${cfg.minRedeemCoins} coins.`,
+    );
+  }
+
+  const account = await prisma.loyaltyAccount.findUnique({
+    where: { userId },
   });
+  if (!account) {
+    throw HttpError.badRequest(
+      'You are not enrolled in Continental Rewards yet. Place your first order to start earning.',
+    );
+  }
+  if (account.coinBalance < coinsRequested) {
+    throw HttpError.badRequest(
+      `You have ${account.coinBalance} coins; requested ${coinsRequested}.`,
+    );
+  }
+
+  const ngnRequested = coinsRequested * cfg.coinValueNgn;
+  const maxNgn = Math.floor(
+    (productSubtotalNgn * cfg.maxOrderRedeemPercent) / 100,
+  );
+  if (ngnRequested > maxNgn) {
+    const maxCoins = Math.floor(maxNgn / cfg.coinValueNgn);
+    throw HttpError.badRequest(
+      `Coin payment caps at ${cfg.maxOrderRedeemPercent}% of the product subtotal — max ${maxCoins} coins on this order.`,
+    );
+  }
+
+  return { coins: coinsRequested, ngnDiscount: ngnRequested };
 }

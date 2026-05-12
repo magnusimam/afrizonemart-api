@@ -320,6 +320,15 @@ model Order {
   couponCode     String?
   couponDiscount Int     @default(0)
 
+  /// Continental Rewards (Tracker #44 PR 3) — coins the customer
+  /// redeemed against this order. `coinDiscount` is the resulting
+  /// NGN discount applied to the order total. Stored separately
+  /// from `couponDiscount` so the order summary can break out the
+  /// two discount lines independently, and so PR 4's refund
+  /// clawback can return the exact number of coins paid.
+  coinsRedeemed  Int     @default(0)
+  coinDiscount   Int     @default(0)
+
   // Selected shipping rate at order time (nullable for legacy orders
   // placed before Phase 4 landed).
   shippingRateId String?

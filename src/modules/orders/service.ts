@@ -1,10 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
+import { LoyaltyTransactionType } from '@prisma/client';
 import { eventBus } from '@/infra/eventBus';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
 import { computeDiscount, evaluateCoupon } from '@/modules/coupons/evaluator';
 import { computeShippingCost, getRatesForCountry } from '@/modules/shipping/service';
+import {
+  applyLoyaltyTransaction,
+  validateCoinRedemption,
+} from '@/modules/loyalty/service';
 import { findOrder, findOrdersByUser } from './repository';
 import type { PlaceOrderBody } from './order.schema';
 
@@ -96,7 +101,23 @@ export async function placeOrder(userId: string, body: PlaceOrderBody) {
 
   const baseShipping = computeShippingCost(chosenRate, subtotal);
   const shippingCost = couponFreeShipping ? 0 : baseShipping;
-  const total = Math.max(0, subtotal - couponDiscount + shippingCost);
+
+  // ----- Continental Rewards coin redemption (Tracker #44 PR 3) -----
+  // Validate BEFORE opening the tx so the row-lock window stays
+  // small. The actual ledger debit happens inside the tx below,
+  // atomically with the order create. If the customer races two
+  // checkouts with overlapping coin spend, `applyLoyaltyTransaction`
+  // re-reads the balance under-tx and rejects the second one.
+  const redemption = await validateCoinRedemption({
+    userId,
+    coinsRequested: body.coinRedeemCoins ?? 0,
+    productSubtotalNgn: subtotal,
+  });
+
+  const total = Math.max(
+    0,
+    subtotal - couponDiscount - redemption.ngnDiscount + shippingCost,
+  );
 
   // ----- Place the order in one transaction -----
   // Bumped timeout from the 5s default — the prisma retry extension can
@@ -120,6 +141,8 @@ export async function placeOrder(userId: string, body: PlaceOrderBody) {
         paymentMethod: body.paymentMethod,
         couponCode,
         couponDiscount,
+        coinsRedeemed: redemption.coins,
+        coinDiscount: redemption.ngnDiscount,
         shippingRateId: chosenRate?.id ?? null,
         items: {
           create: cart.items.map((i) => ({
@@ -175,6 +198,33 @@ export async function placeOrder(userId: string, body: PlaceOrderBody) {
         where: { id: couponId },
         data: { usageCount: { increment: 1 } },
       });
+    }
+
+    // Continental Rewards — debit the redeemed coins atomically
+    // with the order create. applyLoyaltyTransaction re-locks the
+    // account row inside the tx; if the customer raced two
+    // checkouts that combined exceed their balance, the second
+    // one throws here and the whole order rolls back.
+    if (redemption.coins > 0) {
+      const account = await tx.loyaltyAccount.findUnique({
+        where: { userId },
+        select: { id: true },
+      });
+      if (!account) {
+        throw HttpError.badRequest(
+          'Loyalty account missing at redeem time. Try again.',
+        );
+      }
+      await applyLoyaltyTransaction(
+        {
+          accountId: account.id,
+          delta: -redemption.coins,
+          type: LoyaltyTransactionType.REDEEM,
+          causeOrderId: created.id,
+          reason: null,
+        },
+        tx,
+      );
     }
 
     await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
