@@ -107,7 +107,10 @@ export interface CutoutResult {
   cached: boolean;
 }
 
-export async function getOrCreateCutoutForSlug(slug: string): Promise<CutoutResult> {
+export async function getOrCreateCutoutForSlug(
+  slug: string,
+  opts: { force?: boolean } = {},
+): Promise<CutoutResult> {
   const product = await prisma.product.findUnique({
     where: { slug },
     select: { id: true, name: true, images: true },
@@ -122,7 +125,13 @@ export async function getOrCreateCutoutForSlug(slug: string): Promise<CutoutResu
   const key = `cutouts/${hash}.png`;
   const cachedUrl = cutoutPublicUrl(key);
 
-  if (await urlIsLive(cachedUrl)) {
+  // `force=1` skips the cache-hit short-circuit so the caller can
+  // re-run removal after switching providers (e.g. NoopProvider →
+  // RemoveBgProvider once REMOVE_BG_API_KEY is set in env). The
+  // re-generated cutout overwrites the cached object at the same R2
+  // key, so subsequent normal requests pick up the new version
+  // automatically.
+  if (!opts.force && (await urlIsLive(cachedUrl))) {
     return {
       url: cachedUrl,
       isOriginal: false,
