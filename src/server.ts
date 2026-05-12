@@ -27,6 +27,8 @@ import { categoryRoutes } from '@/modules/categories/routes';
 import { shelfRoutes } from '@/modules/shelves/routes';
 import { wishlistRoutes } from '@/modules/wishlist/routes';
 import { shareImageRoutes } from '@/modules/share-image/routes';
+import { loyaltyRoutes } from '@/modules/loyalty/routes';
+import { startLoyaltyEarnSubscriber } from '@/modules/loyalty/subscriber';
 import { seedDefaultShelves } from '@/modules/shelves/service';
 import { seedRegisteredFlags } from '@/modules/feature-flags/service';
 import { blogRoutes } from '@/modules/blog/routes';
@@ -193,6 +195,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/share-image', shareImageRoutes);
+app.use('/api/loyalty', loyaltyRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
@@ -251,6 +254,7 @@ async function start() {
   }
   startWebhookDispatcher();
   startNotificationDispatcher();
+  startLoyaltyEarnSubscriber();
   startAbandonedCartCron();
   startScheduledBlogCron();
   app.listen(env.PORT, () => {
