@@ -1,4 +1,8 @@
-import type { BackgroundRemovalProvider, BackgroundRemovalResult } from './types';
+import type {
+  BackgroundRemovalInput,
+  BackgroundRemovalProvider,
+  BackgroundRemovalResult,
+} from './types';
 
 /**
  * Pass-through provider. Returns the original buffer unchanged.
@@ -13,10 +17,7 @@ import type { BackgroundRemovalProvider, BackgroundRemovalResult } from './types
 export class NoopProvider implements BackgroundRemovalProvider {
   readonly name = 'noop';
 
-  async remove(input: {
-    buffer: Buffer;
-    contentType: string;
-  }): Promise<BackgroundRemovalResult> {
+  async remove(input: BackgroundRemovalInput): Promise<BackgroundRemovalResult> {
     return {
       buffer: input.buffer,
       contentType: input.contentType,

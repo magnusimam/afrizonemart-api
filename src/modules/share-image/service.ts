@@ -7,6 +7,7 @@ import { LocalDiskStorage } from '@/modules/uploads/storage/local-disk';
 import { R2Storage } from '@/modules/uploads/storage/r2';
 import type { UploadStorage } from '@/modules/uploads/storage/types';
 import { sniffImageMime } from '@/modules/uploads/sniff';
+import { CloudflareImagesProvider } from './providers/cloudflare-images';
 import { NoopProvider } from './providers/noop';
 import { RemoveBgProvider } from './providers/remove-bg';
 import type { BackgroundRemovalProvider } from './providers/types';
@@ -39,7 +40,9 @@ import type { BackgroundRemovalProvider } from './providers/types';
 let providerInstance: BackgroundRemovalProvider | null = null;
 function provider(): BackgroundRemovalProvider {
   if (providerInstance) return providerInstance;
-  if (env.REMOVE_BG_API_KEY) {
+  if (env.CF_TRANSFORM_DOMAIN) {
+    providerInstance = new CloudflareImagesProvider(env.CF_TRANSFORM_DOMAIN);
+  } else if (env.REMOVE_BG_API_KEY) {
     providerInstance = new RemoveBgProvider(env.REMOVE_BG_API_KEY);
   } else {
     providerInstance = new NoopProvider();
@@ -156,6 +159,7 @@ export async function getOrCreateCutoutForSlug(
     const result = await p.remove({
       buffer: originalBuffer,
       contentType: sniffed,
+      sourceUrl,
     });
 
     // Even for Noop, we cache the original under the cutouts/ key so

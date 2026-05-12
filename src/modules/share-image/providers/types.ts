@@ -32,7 +32,21 @@ export interface BackgroundRemovalResult {
   provider: string;
 }
 
+/**
+ * Provider input. URL-based providers (Cloudflare Images Transform)
+ * use `sourceUrl` to issue a CDN-side transform and never touch the
+ * buffer. Binary-API providers (remove.bg) post the buffer as
+ * multipart/form-data. The Noop provider just returns the buffer
+ * unchanged. Callers always supply both so every provider can pick
+ * the path it needs.
+ */
+export interface BackgroundRemovalInput {
+  buffer: Buffer;
+  contentType: string;
+  sourceUrl: string;
+}
+
 export interface BackgroundRemovalProvider {
   readonly name: string;
-  remove(input: { buffer: Buffer; contentType: string }): Promise<BackgroundRemovalResult>;
+  remove(input: BackgroundRemovalInput): Promise<BackgroundRemovalResult>;
 }

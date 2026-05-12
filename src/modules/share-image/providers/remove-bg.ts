@@ -1,4 +1,8 @@
-import type { BackgroundRemovalProvider, BackgroundRemovalResult } from './types';
+import type {
+  BackgroundRemovalInput,
+  BackgroundRemovalProvider,
+  BackgroundRemovalResult,
+} from './types';
 
 /**
  * remove.bg API client.
@@ -25,10 +29,7 @@ export class RemoveBgProvider implements BackgroundRemovalProvider {
     this.apiKey = apiKey;
   }
 
-  async remove(input: {
-    buffer: Buffer;
-    contentType: string;
-  }): Promise<BackgroundRemovalResult> {
+  async remove(input: BackgroundRemovalInput): Promise<BackgroundRemovalResult> {
     const form = new FormData();
     form.append(
       'image_file',

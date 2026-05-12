@@ -108,10 +108,20 @@ const envSchema = z.object({
   GIG_ORIGIN_STATE: z.string().default('Lagos'),
 
   // Background-removal provider for the "Share as image" feature.
-  // When REMOVE_BG_API_KEY is set, the share-image cutout service uses
-  // remove.bg's API for a clean transparent PNG; otherwise it falls
-  // back to the Noop provider which returns the original image (the
-  // share card still renders, just without the floating-product look).
+  // Selection order at boot:
+  //   1. CloudflareImagesProvider — picked when CF_TRANSFORM_DOMAIN is
+  //      set. Uses Cloudflare's segment=foreground URL transform on a
+  //      zone where Image Transformations is enabled. ~5,000 free
+  //      transformations/month, then $0.50/1,000. No API key needed.
+  //      This is the preferred provider.
+  //   2. RemoveBgProvider — picked when REMOVE_BG_API_KEY is set and
+  //      no CF domain. Premium-quality output, ~$0.20/image. Kept as
+  //      a fallback for cases where CF transform doesn't satisfy
+  //      (hair-edge precision, etc.).
+  //   3. NoopProvider — when neither env is set. Returns the original
+  //      image; the share card still renders (in the Inset variant)
+  //      but without the floating-product effect.
+  CF_TRANSFORM_DOMAIN: z.string().optional(),
   REMOVE_BG_API_KEY: z.string().optional(),
 });
 
