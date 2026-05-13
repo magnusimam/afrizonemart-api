@@ -10,6 +10,7 @@ import type {
   UpsertProductBody,
 } from './admin.schema';
 import { applyPriceChange } from './pricing.service';
+import { syncProductVariants } from './variants';
 
 /// Collect every image URL referenced by a set of product ids
 /// across both the Product row itself (images[] + brandImageUrl)
@@ -152,6 +153,17 @@ export async function adminCreateProduct(
     },
     include: { category: true },
   });
+  /// Tracker #45 — seed ProductVariant rows (default + bundles).
+  /// Done before the price-history row so a brand-new product
+  /// always has at least one variant available the moment the
+  /// admin page redirects to the edit screen.
+  await syncProductVariants({
+    productId: created.id,
+    attributes,
+    basePrice: body.price,
+    baseComparePrice: body.comparePrice ?? null,
+    inStock: body.inStock,
+  });
   // Seed the history with an "opening" row so the audit drawer
   // shows the price the product launched at, not just deltas after
   // first edit. oldPrice stays null — there was no prior value.
@@ -261,6 +273,28 @@ export async function adminUpdateProduct(
       })),
     );
   }
+
+  /// Tracker #45 — keep ProductVariant rows aligned with the latest
+  /// attributes.bundles + price + stock state. Called even when only
+  /// inStock changes so the variant's stock toggle mirrors the
+  /// product's. applyPriceChange already mirrors the default variant
+  /// price separately, but a price+attributes update needs this to
+  /// flush bundle variant prices too.
+  if (
+    body.attributes !== undefined ||
+    body.inStock !== undefined ||
+    body.price !== undefined ||
+    body.comparePrice !== undefined
+  ) {
+    await syncProductVariants({
+      productId: id,
+      attributes: updated.attributes,
+      basePrice: updated.price,
+      baseComparePrice: updated.comparePrice,
+      inStock: updated.inStock,
+    });
+  }
+
   return updated;
 }
 

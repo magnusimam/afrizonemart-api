@@ -158,6 +158,12 @@ model Product {
   cartItems  CartItem[]
   orderItems OrderItem[]
   placements ProductPlacement[]
+  /// Tracker #45 — bundles are now first-class SKU rows. Every product
+  /// has at least one variant (auto-seeded on create or by migration
+  /// for legacy rows). The cart + order line item refers to a variant,
+  /// not directly to a product, so the customer's selected pack-size +
+  /// its price + its stock all survive into the order.
+  variants   ProductVariant[]
 
   /// Intern assignment for the bulk image-update workflow. The named
   /// intern owns this product's image slot until reassigned. Null when
@@ -227,14 +233,64 @@ model CartItem {
   cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
   productId String
   product   Product  @relation(fields: [productId], references: [id])
+  /// Tracker #45 — every CartItem points at a ProductVariant. Two
+  /// cart lines for the same product but different variants are
+  /// distinct rows (the uniqueness key below is on variant, not
+  /// product). Live pricing reads from the variant; snapshot still
+  /// happens at order time.
+  productVariantId String
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id])
+  /// Display-only label for freeform variants the customer picked
+  /// (e.g. "Red", "Large"). Doesn't affect pricing/stock — those
+  /// live on the variant row itself.
+  variantLabel String?
   // Cart items reference current Product rows for live pricing. Snapshot
   // happens at order time, not cart time.
   quantity  Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([cartId, productId])
+  @@unique([cartId, productVariantId])
   @@index([productId])
+  @@index([productVariantId])
+}
+
+/// Tracker #45 — first-class SKU row. Each Product has one or more
+/// variants; the default variant captures the product's base price
+/// and serves products that don't expose bundle choices. Bundle
+/// selectors on the PDP are rendered straight from this table.
+model ProductVariant {
+  id            String  @id @default(cuid())
+  productId     String
+  product       Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Bundle label as shown on the PDP — "1 Pack", "Carton (12)",
+  /// "Default" for products without bundles.
+  label         String
+  /// Price in Naira (whole units). The cart + order code reads from
+  /// here; Product.price is only used as the fallback for legacy
+  /// reads + as the default-variant seed.
+  priceNgn      Int
+  /// Optional compare-at (strikethrough) price.
+  comparePriceNgn Int?
+  /// How many product units this variant represents (a "Carton (12)"
+  /// has unitsPerPack = 12). Defaults to 1 for plain SKUs.
+  unitsPerPack  Int     @default(1)
+  /// Per-variant stock toggle. Mirrors the product's overall inStock
+  /// for now; lays groundwork for true per-SKU inventory later.
+  inStock       Boolean @default(true)
+  /// Display ordering on the PDP bundle selector.
+  sortOrder     Int     @default(0)
+  /// True for the auto-seeded "1 unit" / "Default" variant created
+  /// when the product has no bundles. Used by product-create paths
+  /// to know whether to update the seed or add a new row.
+  isDefault     Boolean @default(false)
+  cartItems     CartItem[]
+  orderItems    OrderItem[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([productId])
+  @@index([productId, sortOrder])
 }
 
 enum OrderStatus {
@@ -524,6 +580,22 @@ model OrderItem {
   order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId    String
   product      Product @relation(fields: [productId], references: [id])
+  /// Tracker #45 — variant the customer actually bought. Optional
+  /// only for legacy rows backfilled by the variants migration; new
+  /// orders always set this.
+  productVariantId String?
+  productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id])
+  /// Snapshot of the bundle label at order time so reading the
+  /// order in five years still tells you which pack-size shipped.
+  bundleLabel  String?
+  /// Display-only freeform variant label (size/colour) selected
+  /// at add-to-cart time.
+  variantLabel String?
+  /// How many product units one of these line items represents at
+  /// the time of order. Future fulfillment math (e.g. "ship 24
+  /// bottles") leans on this rather than re-reading a mutable
+  /// ProductVariant.
+  unitsPerPack Int     @default(1)
   // Snapshot the product fields so historical orders are stable even if
   // the catalog changes (price, name, image).
   productSlug  String
@@ -534,6 +606,7 @@ model OrderItem {
   lineTotal    Int
 
   @@index([orderId])
+  @@index([productVariantId])
   @@index([productId])
 }
 

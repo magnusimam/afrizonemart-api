@@ -22,7 +22,7 @@ export async function placeOrder(userId: string, body: PlaceOrderBody) {
   const cart = await prisma.cart.findUnique({
     where: { userId },
     include: {
-      items: { include: { product: true } },
+      items: { include: { product: true, productVariant: true } },
       coupon: true,
     },
   });
@@ -30,7 +30,11 @@ export async function placeOrder(userId: string, body: PlaceOrderBody) {
     throw HttpError.badRequest('Cart is empty');
   }
 
-  const oosLine = cart.items.find((i) => !i.product.inStock);
+  /// Tracker #45 — stock + price reads come from the variant. Either the
+  /// product or the variant being out-of-stock blocks checkout.
+  const oosLine = cart.items.find(
+    (i) => !i.product.inStock || !i.productVariant.inStock,
+  );
   if (oosLine) {
     throw HttpError.badRequest(
       `"${oosLine.product.name}" is out of stock — please remove it before checkout.`,
@@ -38,7 +42,7 @@ export async function placeOrder(userId: string, body: PlaceOrderBody) {
   }
 
   const subtotal = cart.items.reduce(
-    (sum, i) => sum + i.product.price * i.quantity,
+    (sum, i) => sum + i.productVariant.priceNgn * i.quantity,
     0,
   );
 
@@ -147,12 +151,16 @@ export async function placeOrder(userId: string, body: PlaceOrderBody) {
         items: {
           create: cart.items.map((i) => ({
             productId: i.productId,
+            productVariantId: i.productVariantId,
+            bundleLabel: i.productVariant.label,
+            variantLabel: i.variantLabel,
+            unitsPerPack: i.productVariant.unitsPerPack,
             productSlug: i.product.slug,
             productName: i.product.name,
             productImage: i.product.images[0] ?? null,
-            unitPrice: i.product.price,
+            unitPrice: i.productVariant.priceNgn,
             quantity: i.quantity,
-            lineTotal: i.product.price * i.quantity,
+            lineTotal: i.productVariant.priceNgn * i.quantity,
           })),
         },
       },

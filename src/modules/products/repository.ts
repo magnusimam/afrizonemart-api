@@ -146,6 +146,9 @@ export async function findProductBySlug(slug: string) {
     include: {
       category: true,
       reviews: { orderBy: { createdAt: 'desc' } },
+      /// Tracker #45 — surface real variant IDs to the storefront so
+      /// PDP add-to-cart can send a real `productVariantId`.
+      variants: { orderBy: [{ isDefault: 'desc' }, { sortOrder: 'asc' }] },
     },
   });
 }

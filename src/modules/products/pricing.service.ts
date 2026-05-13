@@ -125,6 +125,19 @@ export async function applyPriceChange(
 
     await tx.product.update({ where: { id: productId }, data });
 
+    /// Tracker #45 — mirror base-price changes onto the product's
+    /// default variant so the cart/order pricing stays accurate. We
+    /// only touch the default variant; non-default bundle variants
+    /// carry their own prices and are edited via the admin variants
+    /// editor (still TODO — covered by the admin work after #45).
+    await tx.productVariant.updateMany({
+      where: { productId, isDefault: true },
+      data: {
+        priceNgn: nextPrice,
+        comparePriceNgn: nextCompare,
+      },
+    });
+
     await tx.productPriceChange.create({
       data: {
         productId,

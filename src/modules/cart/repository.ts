@@ -5,7 +5,10 @@ export function findCartByUserId(userId: string) {
     where: { userId },
     include: {
       items: {
-        include: { product: true },
+        include: {
+          product: true,
+          productVariant: true,
+        },
         orderBy: { createdAt: 'asc' },
       },
       coupon: true,
@@ -30,15 +33,23 @@ export function clearCartItems(cartId: string) {
   return prisma.cartItem.deleteMany({ where: { cartId } });
 }
 
-export function createCartItems(
-  cartId: string,
-  items: { productId: string; quantity: number }[],
-) {
+/// Tracker #45 — input contains the resolved variant + product, so this
+/// function just persists what the service layer already validated.
+export interface ResolvedCartItem {
+  productId: string;
+  productVariantId: string;
+  variantLabel: string | null;
+  quantity: number;
+}
+
+export function createCartItems(cartId: string, items: ResolvedCartItem[]) {
   if (items.length === 0) return Promise.resolve({ count: 0 });
   return prisma.cartItem.createMany({
     data: items.map((i) => ({
       cartId,
       productId: i.productId,
+      productVariantId: i.productVariantId,
+      variantLabel: i.variantLabel,
       quantity: i.quantity,
     })),
   });

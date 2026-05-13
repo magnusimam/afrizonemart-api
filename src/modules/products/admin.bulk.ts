@@ -2,6 +2,7 @@ import Papa from 'papaparse';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
+import { syncProductVariants } from './variants';
 
 export interface BulkRowResult {
   row: number;
@@ -313,16 +314,33 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
       };
 
       if (existing) {
-        await prisma.product.update({ where: { id: existing.id }, data });
+        const updatedRow = await prisma.product.update({
+          where: { id: existing.id },
+          data,
+        });
+        await syncProductVariants({
+          productId: updatedRow.id,
+          attributes: updatedRow.attributes,
+          basePrice: updatedRow.price,
+          baseComparePrice: updatedRow.comparePrice,
+          inStock: updatedRow.inStock,
+        });
         updated++;
         results.push({ row: rowNum, slug, status: 'updated' });
       } else {
-        await prisma.product.create({
+        const createdRow = await prisma.product.create({
           data: {
             ...data,
             // CREATE always writes attributes (defaults at minimum).
             attributes: (attributesPayload ?? {}) as Prisma.InputJsonValue,
           },
+        });
+        await syncProductVariants({
+          productId: createdRow.id,
+          attributes: createdRow.attributes,
+          basePrice: createdRow.price,
+          baseComparePrice: createdRow.comparePrice,
+          inStock: createdRow.inStock,
         });
         created++;
         results.push({ row: rowNum, slug, status: 'created' });
