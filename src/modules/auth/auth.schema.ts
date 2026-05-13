@@ -32,6 +32,11 @@ export const registerBodySchema = z.object({
   email: emailField,
   password: passwordField,
   name: z.string().trim().min(1).max(100).optional(),
+  /// Tracker #48 — marketing opt-in checkbox on signup. Default
+  /// false on both sides; storefront sends true when the customer
+  /// explicitly ticks the box.
+  marketingOptIn: z.boolean().optional(),
+  smsOptIn: z.boolean().optional(),
 });
 export type RegisterBody = z.infer<typeof registerBodySchema>;
 
@@ -66,6 +71,11 @@ export const updateMeBodySchema = z
       .trim()
       .regex(/^\+\d{7,15}$/, 'Use E.164 format like +2348012345678')
       .optional(),
+    /// Tracker #48 — marketing consent toggles. Flip from
+    /// /account/profile. Sending false also satisfies the
+    /// unsubscribe path when the customer is signed in.
+    marketingOptIn: z.boolean().optional(),
+    smsOptIn: z.boolean().optional(),
   })
   .strict();
 export type UpdateMeBody = z.infer<typeof updateMeBodySchema>;

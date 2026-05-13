@@ -50,6 +50,11 @@ export interface PublicUser {
   /// the admin granted them via /admin/staff; SELLER/CUSTOMER get the
   /// role defaults.
   permissions: string[];
+  /// Tracker #48 — marketing consent flags. Surfaced to the
+  /// storefront so the profile toggles render the current state +
+  /// the auth store has them available for any client-side gating.
+  marketingOptIn: boolean;
+  smsOptIn: boolean;
   createdAt: string;
 }
 
@@ -77,6 +82,8 @@ function toPublic(user: User): PublicUser {
     role: user.role,
     jobTitle: user.jobTitle ?? null,
     permissions,
+    marketingOptIn: user.marketingOptIn,
+    smsOptIn: user.smsOptIn,
     createdAt: user.createdAt.toISOString(),
   };
 }
@@ -107,6 +114,8 @@ export async function register(body: RegisterBody): Promise<AuthResult> {
     email: body.email,
     passwordHash,
     name: body.name,
+    marketingOptIn: body.marketingOptIn,
+    smsOptIn: body.smsOptIn,
   });
 
   await eventBus.emit('user.registered', {
@@ -261,6 +270,8 @@ export async function updateMe(
     data: {
       ...(body.name !== undefined && { name: body.name }),
       ...(body.phone !== undefined && { phone: body.phone }),
+      ...(body.marketingOptIn !== undefined && { marketingOptIn: body.marketingOptIn }),
+      ...(body.smsOptIn !== undefined && { smsOptIn: body.smsOptIn }),
     },
   });
 

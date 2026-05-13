@@ -228,6 +228,8 @@ function toPublic(user: User): PublicUser {
     role: user.role,
     jobTitle: user.jobTitle ?? null,
     permissions,
+    marketingOptIn: user.marketingOptIn,
+    smsOptIn: user.smsOptIn,
     createdAt: user.createdAt.toISOString(),
   };
 }

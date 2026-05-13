@@ -60,6 +60,16 @@ model User {
   failedLoginAttempts Int       @default(0)
   lastFailedLoginAt   DateTime?
   lockedUntil         DateTime?
+  /// Tracker #48 — marketing consent flags. NDPR / GDPR foundation
+  /// for every campaign + automation flow built on top of this.
+  /// Defaults to false; existing users not grandfathered. Customer
+  /// can flip both from /account/profile, OR via the signed
+  /// one-click unsubscribe link in any marketing email.
+  /// `marketingOptIn` gates email campaigns. `smsOptIn` is the
+  /// future SMS / WhatsApp channel mirror — when the SMS provider
+  /// is wired, this is the column it gates on.
+  marketingOptIn      Boolean   @default(false)
+  smsOptIn            Boolean   @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

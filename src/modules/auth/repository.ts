@@ -19,6 +19,9 @@ export function createUser(data: {
   passwordHash: string;
   name?: string;
   role?: UserRole;
+  /// Tracker #48 — opt-in flags captured at signup. Omitted = false.
+  marketingOptIn?: boolean;
+  smsOptIn?: boolean;
 }): Promise<User> {
   return prisma.user.create({
     data: {
@@ -26,6 +29,8 @@ export function createUser(data: {
       passwordHash: data.passwordHash,
       name: data.name,
       role: data.role,
+      marketingOptIn: data.marketingOptIn ?? false,
+      smsOptIn: data.smsOptIn ?? false,
     },
   });
 }
