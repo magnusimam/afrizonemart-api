@@ -125,13 +125,15 @@ export async function applyPriceChange(
 
     await tx.product.update({ where: { id: productId }, data });
 
-    /// Tracker #45 — mirror base-price changes onto the product's
-    /// default variant so the cart/order pricing stays accurate. We
-    /// only touch the default variant; non-default bundle variants
-    /// carry their own prices and are edited via the admin variants
-    /// editor (still TODO — covered by the admin work after #45).
+    /// Tracker #45 — mirror base-price changes onto the synthetic
+    /// "Default" variant when there are no bundles. Products WITH
+    /// bundles use the cheapest bundle as their default; their
+    /// variant prices come from `attributes.bundles` and are kept in
+    /// sync by `syncProductVariants()` when admin edits the bundle
+    /// JSON. Touching them here would silently overwrite a bundle's
+    /// price with the (meaningless-for-bundled-products) base price.
     await tx.productVariant.updateMany({
-      where: { productId, isDefault: true },
+      where: { productId, isDefault: true, label: 'Default' },
       data: {
         priceNgn: nextPrice,
         comparePriceNgn: nextCompare,

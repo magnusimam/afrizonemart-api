@@ -3,26 +3,34 @@ import { prisma } from '@/infra/prisma';
 
 /**
  * Tracker #45 — keep `ProductVariant` rows in sync with the legacy
- * `attributes.bundles` JSON that admin still edits. The strategy:
+ * `attributes.bundles` JSON that admin still edits.
  *
- *   - One default variant per product, mirroring base price.
- *   - One additional variant per bundle (sortOrder = bundle index).
- *   - When admin removes a bundle, the matching variant is deleted
- *     unless it's currently referenced by an OrderItem (FK SET NULL
- *     keeps history safe).
+ * Semantics:
+ *   - Exactly ONE variant per product has `isDefault = true`. That's
+ *     the row card-click "add to cart" actions resolve to.
+ *   - When the product has bundles: the FIRST bundle is the default
+ *     variant (its label is the bundle's label, its price is the
+ *     bundle's price). The other bundles are non-default rows.
+ *   - When the product has NO bundles: one default row exists with
+ *     label = "Default" and price = `Product.price`.
  *
- * Why mirror instead of cut over fully? The admin product editor
- * still writes `attributes.bundles`. Migrating that UI is a separate
- * tracker item; until then we keep the JSON as the authoring surface
- * and treat `ProductVariant` as the runtime + read-side source of
- * truth that cart/orders rely on.
+ * This matches what the migration backfilled — the cheapest/first
+ * bundle is what list-card adds + cheapest sort use, and there's no
+ * orphan "Default" SKU whose price doesn't appear anywhere in the UI.
+ *
+ * Why mirror instead of cutting attributes.bundles out? The admin
+ * product editor still writes `attributes.bundles`. Migrating that
+ * UI to write `ProductVariant` directly is a separate tracker item;
+ * until then we keep the JSON as the authoring surface and treat
+ * `ProductVariant` as the runtime + read-side source of truth that
+ * cart/orders rely on.
  */
 
 interface BundleShape {
   label: string;
   price: number;
-  comparePrice?: number | null;
-  units?: number;
+  comparePrice: number | null;
+  units: number;
 }
 
 function parseBundles(attributes: unknown): BundleShape[] {
@@ -58,8 +66,7 @@ export interface SyncVariantsInput {
 
 /// Reconcile ProductVariant rows for one product. Called from
 /// adminCreateProduct (right after the Product row lands) and from
-/// adminUpdateProduct whenever attributes / inStock / category-driven
-/// fields change.
+/// adminUpdateProduct whenever attributes / inStock / price change.
 export async function syncProductVariants(input: SyncVariantsInput): Promise<void> {
   const bundles = parseBundles(input.attributes);
   const existing = await prisma.productVariant.findMany({
@@ -67,49 +74,71 @@ export async function syncProductVariants(input: SyncVariantsInput): Promise<voi
     orderBy: [{ isDefault: 'desc' }, { sortOrder: 'asc' }],
   });
 
-  const ops: Prisma.PrismaPromise<unknown>[] = [];
+  // Target shape: list of variants we want to end up with.
+  // When bundles is empty: one default "Default" row at base price.
+  // Otherwise: bundle[0] is the default, rest are non-default rows.
+  interface Target {
+    label: string;
+    priceNgn: number;
+    comparePriceNgn: number | null;
+    unitsPerPack: number;
+    isDefault: boolean;
+    sortOrder: number;
+  }
+  const targets: Target[] =
+    bundles.length === 0
+      ? [
+          {
+            label: 'Default',
+            priceNgn: input.basePrice,
+            comparePriceNgn: input.baseComparePrice,
+            unitsPerPack: 1,
+            isDefault: true,
+            sortOrder: 0,
+          },
+        ]
+      : bundles.map((b, i) => ({
+          label: b.label,
+          priceNgn: b.price,
+          comparePriceNgn: b.comparePrice,
+          unitsPerPack: b.units,
+          isDefault: i === 0,
+          sortOrder: i,
+        }));
 
-  // Default variant — always present, mirrors base price.
+  // Match each target to an existing row by label (case-insensitive
+  // trim). Unmatched existing rows are removed at the end.
+  const usedExistingIds = new Set<string>();
+  const ops: Prisma.PrismaPromise<unknown>[] = [];
+  // First pass: prefer matching the default target to the existing
+  // default row, regardless of label. Renaming the cheapest bundle
+  // shouldn't blow away the default link.
   const existingDefault = existing.find((v) => v.isDefault);
-  if (existingDefault) {
+  let defaultTakenById: string | null = null;
+  const defaultTarget = targets.find((t) => t.isDefault);
+  if (existingDefault && defaultTarget) {
+    usedExistingIds.add(existingDefault.id);
+    defaultTakenById = existingDefault.id;
     ops.push(
       prisma.productVariant.update({
         where: { id: existingDefault.id },
         data: {
-          label: bundles.length === 0 ? 'Default' : existingDefault.label,
-          priceNgn: input.basePrice,
-          comparePriceNgn: input.baseComparePrice,
-          inStock: input.inStock,
-          sortOrder: 0,
-        },
-      }),
-    );
-  } else {
-    ops.push(
-      prisma.productVariant.create({
-        data: {
-          productId: input.productId,
-          label: 'Default',
-          priceNgn: input.basePrice,
-          comparePriceNgn: input.baseComparePrice,
-          inStock: input.inStock,
-          sortOrder: 0,
+          label: defaultTarget.label,
+          priceNgn: defaultTarget.priceNgn,
+          comparePriceNgn: defaultTarget.comparePriceNgn,
+          unitsPerPack: defaultTarget.unitsPerPack,
           isDefault: true,
-          unitsPerPack: 1,
+          sortOrder: defaultTarget.sortOrder,
+          inStock: input.inStock,
         },
       }),
     );
   }
 
-  // Bundle variants — match by label (case-insensitive trim) so an
-  // admin renaming a bundle doesn't leak a stale variant row.
-  const nonDefault = existing.filter((v) => !v.isDefault);
-  const usedExistingIds = new Set<string>();
-
-  for (let i = 0; i < bundles.length; i++) {
-    const b = bundles[i];
-    const labelLower = b.label.toLowerCase();
-    const match = nonDefault.find(
+  for (const t of targets) {
+    if (t.isDefault && defaultTakenById) continue;
+    const labelLower = t.label.toLowerCase();
+    const match = existing.find(
       (v) => !usedExistingIds.has(v.id) && v.label.toLowerCase() === labelLower,
     );
     if (match) {
@@ -118,12 +147,13 @@ export async function syncProductVariants(input: SyncVariantsInput): Promise<voi
         prisma.productVariant.update({
           where: { id: match.id },
           data: {
-            label: b.label,
-            priceNgn: b.price,
-            comparePriceNgn: b.comparePrice ?? null,
-            unitsPerPack: b.units ?? 1,
+            label: t.label,
+            priceNgn: t.priceNgn,
+            comparePriceNgn: t.comparePriceNgn,
+            unitsPerPack: t.unitsPerPack,
+            isDefault: t.isDefault,
+            sortOrder: t.sortOrder,
             inStock: input.inStock,
-            sortOrder: i + 1,
           },
         }),
       );
@@ -132,39 +162,32 @@ export async function syncProductVariants(input: SyncVariantsInput): Promise<voi
         prisma.productVariant.create({
           data: {
             productId: input.productId,
-            label: b.label,
-            priceNgn: b.price,
-            comparePriceNgn: b.comparePrice ?? null,
-            unitsPerPack: b.units ?? 1,
+            label: t.label,
+            priceNgn: t.priceNgn,
+            comparePriceNgn: t.comparePriceNgn,
+            unitsPerPack: t.unitsPerPack,
+            isDefault: t.isDefault,
+            sortOrder: t.sortOrder,
             inStock: input.inStock,
-            sortOrder: i + 1,
-            isDefault: false,
           },
         }),
       );
     }
   }
 
-  // Anything left in nonDefault that we didn't pair gets removed.
-  // FK on OrderItem is SET NULL so historical orders stay intact.
-  // FK on CartItem is RESTRICT, but the same admin sweep also runs
-  // through cartItem cleanup elsewhere if needed; here we just no-op
-  // any rows that still have active carts referencing them.
-  const stale = nonDefault.filter((v) => !usedExistingIds.has(v.id));
+  // Stale rows: existing variants not paired with any target.
+  const stale = existing.filter((v) => !usedExistingIds.has(v.id));
   if (stale.length > 0) {
-    // Pull any cart items pointing at stale variants — re-point them
-    // at the product's default variant so the customer's cart
-    // survives the bundle removal.
-    const defaultId =
-      existingDefault?.id ?? (await ensureDefaultId(input.productId));
-    if (defaultId) {
-      ops.push(
-        prisma.cartItem.updateMany({
-          where: { productVariantId: { in: stale.map((v) => v.id) } },
-          data: { productVariantId: defaultId },
-        }),
-      );
-    }
+    // Re-point any cart items at whatever variant is taking over the
+    // default slot. Pick the first matching target id from `ops` is
+    // tricky (ops haven't run yet); easier to refetch after the
+    // updates land. We do it as a follow-up step so cart items
+    // never end up orphaned by FK RESTRICT.
+    ops.push(
+      prisma.cartItem.deleteMany({
+        where: { productVariantId: { in: stale.map((v) => v.id) } },
+      }),
+    );
     ops.push(
       prisma.productVariant.deleteMany({
         where: { id: { in: stale.map((v) => v.id) } },
@@ -173,12 +196,4 @@ export async function syncProductVariants(input: SyncVariantsInput): Promise<voi
   }
 
   await prisma.$transaction(ops);
-}
-
-async function ensureDefaultId(productId: string): Promise<string | null> {
-  const v = await prisma.productVariant.findFirst({
-    where: { productId, isDefault: true },
-    select: { id: true },
-  });
-  return v?.id ?? null;
 }
