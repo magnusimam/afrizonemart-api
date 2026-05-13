@@ -140,6 +140,12 @@ export class GtSquadGateway implements PaymentGateway {
         gateway_ref?: string;
         amount?: number;
         currency?: string;
+        /// Tracker #47 — Squad sometimes surfaces a human-readable
+        /// reason on failure (e.g. "Merchant has not been configured
+        /// for bin"). Forward it to the customer's "payment failed"
+        /// email when present.
+        gateway_response?: string;
+        message?: string;
       };
     };
     try {
@@ -175,6 +181,7 @@ export class GtSquadGateway implements PaymentGateway {
         gatewayRef: ref,
         verified,
         rawPayload: payload as Record<string, unknown>,
+        reason: inner.gateway_response ?? inner.message ?? undefined,
       };
     }
     // Pending or unknown — don't flip the order yet.
@@ -227,11 +234,17 @@ export class GtSquadGateway implements PaymentGateway {
       };
     }
     if (statusStr === 'failed' || statusStr === 'abandoned') {
+      const reason =
+        (data as Record<string, unknown>).gateway_response as string | undefined
+        ?? (data as Record<string, unknown>).transaction_message as string | undefined
+        ?? (json as { message?: string }).message
+        ?? undefined;
       return {
         status: 'FAILED',
         gatewayRef,
         verified,
         rawPayload: data as unknown as Record<string, unknown>,
+        reason,
       };
     }
     return { status: 'IGNORED', reason: `Non-terminal status: ${statusStr}` };

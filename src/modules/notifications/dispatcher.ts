@@ -4,7 +4,9 @@ import { logger } from '@/infra/logger';
 import { prisma } from '@/infra/prisma';
 import { sendEmail } from './service';
 import { AbandonedCartEmail } from './templates/AbandonedCart';
+import { OrderAwaitingPaymentEmail } from './templates/OrderAwaitingPayment';
 import { OrderConfirmedEmail } from './templates/OrderConfirmed';
+import { PaymentFailedEmail } from './templates/PaymentFailed';
 import { PaymentReceivedEmail } from './templates/PaymentReceived';
 import { OrderShippedEmail } from './templates/OrderShipped';
 import { OrderDeliveredEmail } from './templates/OrderDelivered';
@@ -72,12 +74,100 @@ const PAYMENT_LABEL: Record<string, string> = {
 };
 
 export function startNotificationDispatcher(): void {
-  // ---------- order.placed → OrderConfirmed ----------
+  // ---------- order.placed ----------
+  // Tracker #47 — STRICT rule: this event does NOT send the "Order
+  // Confirmed" email. order.placed fires before any payment has been
+  // confirmed, so emailing a confirmation here would (and did) leak
+  // a confirmation for failed/abandoned payments.
+  //
+  // For online-pay methods (CARD/MOBILE_MONEY/USSD/CRYPTO via
+  // gateway): NO email here — we wait for `order.paid` from the
+  // webhook or verifyPayment path.
+  //
+  // For offline-pay methods (BANK_TRANSFER / CASH_ON_DELIVERY):
+  // send an "Order received — awaiting payment" email so the
+  // customer has confirmation we got the order and the bank-
+  // transfer details. The "Order confirmed" email comes later
+  // when admin marks the order PAID.
   eventBus.on('order.placed', async ({ orderId }) => {
     const order = await loadOrderForEmail(orderId);
     if (!order || !order.user.email) return;
 
+    const isOffline =
+      order.paymentMethod === 'BANK_TRANSFER' ||
+      order.paymentMethod === 'CASH_ON_DELIVERY';
+    if (!isOffline) return;
+
+    /// Load matching bank account(s) for bank transfer. NGN-only
+    /// today — when storefront sends multi-currency orders this
+    /// reads from `order.currency` instead.
+    let bankAccounts: Array<{
+      bankName: string;
+      accountName: string;
+      accountNumber: string;
+      currency: string;
+      instructions?: string | null;
+    }> = [];
+    if (order.paymentMethod === 'BANK_TRANSFER') {
+      const accounts = await prisma.paymentBankAccount.findMany({
+        where: {
+          isActive: true,
+          currency: order.currency,
+          OR: [
+            { country: null },
+            { country: order.shipCountry.toUpperCase() },
+          ],
+        },
+        orderBy: [{ sortOrder: 'asc' }, { bankName: 'asc' }],
+      });
+      bankAccounts = accounts.map((a) => ({
+        bankName: a.bankName,
+        accountName: a.accountName,
+        accountNumber: a.accountNumber,
+        currency: a.currency,
+        instructions: a.instructions,
+      }));
+    }
+
     const props = {
+      customerName: order.user.name?.split(' ')[0] ?? 'there',
+      orderNumber: order.orderNumber,
+      total: order.total,
+      paymentMethodLabel: PAYMENT_LABEL[order.paymentMethod] ?? order.paymentMethod,
+      bankAccounts,
+      reference: order.orderNumber,
+      orderUrl: `${env.WEB_URL}/account/orders/${order.id}`,
+    };
+
+    await sendEmail({
+      type: 'order.awaiting_payment',
+      to: order.user.email,
+      subject: `Order ${order.orderNumber} received — awaiting payment`,
+      userId: order.user.id,
+      context: { orderId, orderNumber: order.orderNumber },
+      template: OrderAwaitingPaymentEmail(props),
+      variables: props as unknown as Record<string, unknown>,
+    });
+  });
+
+  // ---------- order.paid ----------
+  // Tracker #47 — THIS is the customer-facing "Order confirmed"
+  // trigger. Fires from three paths, all funnelled through one
+  // `applyOutcome` (Squad webhook), `verifyPayment` (post-redirect
+  // poll), or admin manually flipping a bank-transfer order to
+  // PAID. Subscribers don't care which.
+  //
+  // We send TWO emails: OrderConfirmed (the substantive "we've got
+  // your order, here's what shipped to where") + PaymentReceived
+  // (the financial receipt with amount + method + paidAt). Most
+  // ecommerce platforms do both, and the receipt one is
+  // particularly important for bank-transfer customers since it's
+  // the first time they're told the transfer matched.
+  eventBus.on('order.paid', async ({ orderId, method, source }) => {
+    const order = await loadOrderForEmail(orderId);
+    if (!order || !order.user.email) return;
+
+    const confirmedProps = {
       customerName: order.user.name?.split(' ')[0] ?? 'there',
       orderNumber: order.orderNumber,
       orderId: order.id,
@@ -97,24 +187,17 @@ export function startNotificationDispatcher(): void {
       estimatedDelivery: estimateEta(),
       trackUrl: `${env.WEB_URL}/account/orders/${order.id}`,
     };
-
     await sendEmail({
       type: 'order.confirmed',
       to: order.user.email,
       subject: `Order ${order.orderNumber} confirmed`,
       userId: order.user.id,
-      context: { orderId, orderNumber: order.orderNumber },
-      template: OrderConfirmedEmail(props),
-      variables: props as unknown as Record<string, unknown>,
+      context: { orderId, orderNumber: order.orderNumber, source },
+      template: OrderConfirmedEmail(confirmedProps),
+      variables: confirmedProps as unknown as Record<string, unknown>,
     });
-  });
 
-  // ---------- order.paid → PaymentReceived ----------
-  eventBus.on('order.paid', async ({ orderId, method }) => {
-    const order = await loadOrderForEmail(orderId);
-    if (!order || !order.user.email) return;
-
-    const props = {
+    const receiptProps = {
       customerName: order.user.name?.split(' ')[0] ?? 'there',
       orderNumber: order.orderNumber,
       amount: order.total - order.refundedTotal,
@@ -122,14 +205,43 @@ export function startNotificationDispatcher(): void {
       paidAt: fmtDateTime(new Date()),
       receiptUrl: `${env.WEB_URL}/account/orders/${order.id}`,
     };
-
     await sendEmail({
       type: 'payment.received',
       to: order.user.email,
       subject: `Payment received for ${order.orderNumber}`,
       userId: order.user.id,
-      context: { orderId, orderNumber: order.orderNumber, method },
-      template: PaymentReceivedEmail(props),
+      context: { orderId, orderNumber: order.orderNumber, method, source },
+      template: PaymentReceivedEmail(receiptProps),
+      variables: receiptProps as unknown as Record<string, unknown>,
+    });
+  });
+
+  // ---------- payment.failed ----------
+  // Tracker #47 — terminal "gateway said no" event. Today's only
+  // emitter is the FAILED branch inside applyOutcome. Sends a
+  // customer-facing "try again" email with the gateway's reason if
+  // available (e.g. "Merchant not configured for BIN"). Order stays
+  // in PENDING_PAYMENT so the customer can retry on the order page
+  // — we don't auto-cancel.
+  eventBus.on('payment.failed', async ({ orderId, method, reason }) => {
+    const order = await loadOrderForEmail(orderId);
+    if (!order || !order.user.email) return;
+
+    const props = {
+      customerName: order.user.name?.split(' ')[0] ?? 'there',
+      orderNumber: order.orderNumber,
+      amount: order.total,
+      method: PAYMENT_LABEL[method] ?? method,
+      reason: reason ?? null,
+      retryUrl: `${env.WEB_URL}/account/orders/${order.id}`,
+    };
+    await sendEmail({
+      type: 'payment.failed',
+      to: order.user.email,
+      subject: `Payment couldn't be processed for ${order.orderNumber}`,
+      userId: order.user.id,
+      context: { orderId, orderNumber: order.orderNumber, method, reason },
+      template: PaymentFailedEmail(props),
       variables: props as unknown as Record<string, unknown>,
     });
   });
@@ -296,6 +408,7 @@ export function startNotificationDispatcher(): void {
     subscriptions: [
       'order.placed',
       'order.paid',
+      'payment.failed',
       'order.shipped',
       'order.delivered',
       'order.cancelled',

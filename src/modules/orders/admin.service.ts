@@ -143,6 +143,33 @@ export async function adminUpdateStatus(
       orderId: id,
       userId: existing.userId,
     });
+  } else if (
+    /// Tracker #47 — when admin manually flips a PENDING_PAYMENT
+    /// order to PAID (e.g. after confirming a bank transfer landed
+    /// or COD was collected by the courier), fire the same
+    /// `order.paid` event the gateway webhook would fire. Single
+    /// trigger → same OrderConfirmed + PaymentReceived emails →
+    /// same fulfilment + loyalty downstream. Avoids a forked
+    /// "admin-marked PAID" pathway that drifts from the canonical
+    /// one over time.
+    body.status === 'PAID' &&
+    existing.status === 'PENDING_PAYMENT'
+  ) {
+    /// Find the most recent payment row for this order so the event
+    /// carries a paymentId (callers like loyalty + refund clawback
+    /// expect it). For COD orders there may be no Payment row, in
+    /// which case we skip the paymentId; subscribers tolerate this.
+    const latestPayment = await prisma.payment.findFirst({
+      where: { orderId: id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, gateway: true },
+    });
+    await eventBus.emit('order.paid', {
+      orderId: id,
+      paymentId: latestPayment?.id ?? '',
+      method: latestPayment?.gateway ?? 'manual',
+      source: 'admin',
+    });
   }
 
   await logAudit({

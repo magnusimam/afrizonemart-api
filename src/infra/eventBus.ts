@@ -24,6 +24,26 @@ export interface EventMap {
     orderId: string;
     paymentId: string;
     method: string;
+    /// Where the PAID flip came from: gateway webhook, the post-redirect
+    /// verifyPayment poll, or an admin marking it manually (e.g. after a
+    /// bank-transfer confirmation). Useful for analytics + so subscribers
+    /// can branch ("admin-confirmed bank transfer" emails should look
+    /// slightly different from "Squad webhook said yes").
+    source: 'gateway_webhook' | 'verify_redirect' | 'admin';
+  };
+  /// Tracker #47 — terminal "payment didn't go through" signal. Fires
+  /// when the gateway reports FAILED (or, in future, when a customer
+  /// abandons the gateway page and a sweeper picks it up). Lets us
+  /// email the customer a "try again" + ping admin.
+  'payment.failed': {
+    orderId: string;
+    paymentId: string;
+    method: string;
+    /// Gateway-reported reason if available. Goes straight into the
+    /// customer's email + admin notification so we don't have to guess
+    /// when a card BIN gets rejected.
+    reason?: string | null;
+    source: 'gateway_webhook' | 'verify_redirect';
   };
   'order.shipped': {
     orderId: string;

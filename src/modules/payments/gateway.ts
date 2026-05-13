@@ -49,6 +49,12 @@ export type WebhookOutcome =
       gatewayRef: string;
       verified?: VerifiedSettlement;
       rawPayload: Record<string, unknown>;
+      /// Tracker #47 — gateway-supplied reason for the decline.
+      /// Surfaced verbatim in the customer's "payment failed" email
+      /// because the reason is usually actionable ("Insufficient
+      /// funds", "Card declined", "Merchant not configured for BIN").
+      /// Optional because not every gateway sends one.
+      reason?: string;
     }
   | { status: 'IGNORED'; reason: string };
 

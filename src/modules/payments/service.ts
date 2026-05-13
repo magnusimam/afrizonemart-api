@@ -212,6 +212,12 @@ export async function initPayment(orderId: string, userId: string) {
 export async function applyWebhookOutcome(
   outcome: WebhookOutcome,
   replayGuard?: WebhookReplayGuard,
+  /// Tracker #47 — where the call came from. The webhook controller
+  /// passes 'gateway_webhook'; verifyPayment / checkOrderPayment pass
+  /// 'verify_redirect'. Plumbed through into the emitted order.paid /
+  /// payment.failed events so analytics + email subscribers can
+  /// distinguish "Squad told us" from "we asked Squad".
+  source: 'gateway_webhook' | 'verify_redirect' = 'gateway_webhook',
 ): Promise<{ acknowledged: boolean; reason?: string }> {
   if (outcome.status === 'IGNORED') return { acknowledged: false, reason: outcome.reason };
 
@@ -337,12 +343,39 @@ export async function applyWebhookOutcome(
       orderId: payment.orderId,
       paymentId: payment.id,
       method: payment.gateway,
+      source,
     });
     await logAudit({
       entityType: 'order',
       entityId: payment.orderId,
       action: 'order.paid',
-      changes: { gateway: payment.gateway, gatewayRef: outcome.gatewayRef, amount: payment.amount },
+      changes: { gateway: payment.gateway, gatewayRef: outcome.gatewayRef, amount: payment.amount, source },
+    });
+  }
+
+  /// Tracker #47 — FAILED branch. Emit `payment.failed` so the
+  /// notifications dispatcher can email the customer + admin gets a
+  /// ping. Only fires when the order was still pending (not e.g. a
+  /// late FAILED webhook on a payment that already succeeded via
+  /// another channel).
+  if (outcome.status === 'FAILED' && payment.order.status === 'PENDING_PAYMENT') {
+    await eventBus.emit('payment.failed', {
+      orderId: payment.orderId,
+      paymentId: payment.id,
+      method: payment.gateway,
+      reason: outcome.reason ?? null,
+      source,
+    });
+    await logAudit({
+      entityType: 'order',
+      entityId: payment.orderId,
+      action: 'payment.failed',
+      changes: {
+        gateway: payment.gateway,
+        gatewayRef: outcome.gatewayRef,
+        reason: outcome.reason ?? null,
+        source,
+      },
     });
   }
 
@@ -361,7 +394,7 @@ export async function verifyPayment(gatewayRef: string, userId: string) {
   if (payment.status === 'INITIATED') {
     const gw = await gatewayById(payment.gateway);
     const outcome = await gw.verify(gatewayRef);
-    await applyWebhookOutcome(outcome);
+    await applyWebhookOutcome(outcome, undefined, 'verify_redirect');
   }
 
   // Re-fetch after potential update.
