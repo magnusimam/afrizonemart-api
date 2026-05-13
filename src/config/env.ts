@@ -79,6 +79,11 @@ const envSchema = z.object({
   // selected; otherwise the ConsoleEmailProvider just logs the rendered
   // HTML to the terminal — perfect for local dev without burning quota.
   RESEND_API_KEY: z.string().optional(),
+  /// Tracker #49 — Svix-style webhook signing secret. Set this in
+  /// Railway after adding the webhook endpoint in the Resend
+  /// dashboard. Without it the /api/webhooks/resend endpoint
+  /// rejects every delivery (no signature → no trust).
+  RESEND_WEBHOOK_SECRET: z.string().optional(),
   EMAIL_FROM: z.string().default('Afrizonemart <no-reply@afrizonemart.com>'),
   EMAIL_REPLY_TO: z.string().optional(),
 

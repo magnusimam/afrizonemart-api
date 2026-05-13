@@ -769,12 +769,77 @@ model Notification {
   // every related entity from the DB.
   context           Json                @default("{}")
   sentAt            DateTime?
+  /// Tracker #49 — denormalised mirrors of EmailEvent rows so the
+  /// admin notifications list can render "opened? clicked? bounced?"
+  /// without aggregating the event log on every request. The full
+  /// history (including multi-opens / multi-clicks) lives in
+  /// EmailEvent rows linked by providerMessageId.
+  deliveredAt       DateTime?
+  firstOpenedAt     DateTime?
+  lastOpenedAt      DateTime?
+  openCount         Int                 @default(0)
+  firstClickedAt    DateTime?
+  lastClickedAt     DateTime?
+  clickCount        Int                 @default(0)
+  /// Hard bounce (invalid mailbox, blocked domain). Sets status to
+  /// FAILED. Soft delays don't populate this — they retry.
+  bouncedAt         DateTime?
+  bounceReason      String?             @db.Text
+  /// Spam complaint from the recipient's mail client.
+  complainedAt      DateTime?
+  events            EmailEvent[]
   createdAt         DateTime            @default(now())
 
   @@index([userId])
+  @@index([providerMessageId])
   @@index([type])
   @@index([status])
   @@index([createdAt])
+}
+
+/// Tracker #49 — per-event row for delivery / open / click / bounce
+/// / complaint signals received from the email provider (Resend
+/// today, others later). The Notification row keeps a denormalised
+/// summary (first/last open + count etc.) so common admin queries
+/// don't touch this table; raw events live here for analytics + ML.
+enum EmailEventType {
+  SENT
+  DELIVERED
+  DELIVERY_DELAYED
+  OPENED
+  CLICKED
+  BOUNCED
+  COMPLAINED
+}
+
+model EmailEvent {
+  id                String         @id @default(cuid())
+  /// FK to Notification; nullable in the rare case Resend posts an
+  /// event we have no record of (test sends, deleted notifications,
+  /// pre-Tracker-#49 sends with no providerMessageId).
+  notificationId    String?
+  notification      Notification?  @relation(fields: [notificationId], references: [id], onDelete: SetNull)
+  /// Resend's email id, copied from the webhook payload. Lets us
+  /// match against Notification.providerMessageId even when the
+  /// Notification row hasn't been linked yet.
+  providerMessageId String
+  type              EmailEventType
+  /// When the event occurred, per Resend's `created_at` field.
+  /// Falls back to row's createdAt if the payload didn't include one.
+  occurredAt        DateTime
+  /// Click events carry the URL the recipient clicked. Other types
+  /// leave this null.
+  clickedUrl        String?
+  /// Bounce events carry the reason / classification (hard vs soft).
+  bounceType        String?
+  bounceReason      String?        @db.Text
+  /// Raw webhook payload kept for debugging + future enrichment.
+  rawPayload        Json           @default("{}")
+  createdAt         DateTime       @default(now())
+
+  @@index([providerMessageId])
+  @@index([notificationId])
+  @@index([type, occurredAt])
 }
 
 // ------------------------------------------------------------------
