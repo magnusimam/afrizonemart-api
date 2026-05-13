@@ -986,6 +986,73 @@ model EmailTemplate {
 // registry entry; the rest is data.
 // ------------------------------------------------------------------
 
+/// Tracker #46 — customer-facing payment method config. One row per
+/// method the customer sees on /checkout/payment. Type-specific
+/// data (USSD codes, mobile-money providers, crypto wallets, POD
+/// cities/fee) lives on the `details` Json so adding new method
+/// variants doesn't require a schema migration. Bank transfer
+/// accounts live in a separate `PaymentBankAccount` table because
+/// they're multi-row per method (one per currency/country).
+enum PaymentMethodCode {
+  CARD
+  MOBILE_MONEY
+  BANK_TRANSFER
+  USSD
+  CRYPTO
+  PAY_ON_DELIVERY
+}
+
+model PaymentMethodConfig {
+  id          String              @id @default(cuid())
+  code        PaymentMethodCode   @unique
+  label       String
+  description String
+  /// Icon key consumed by the storefront switch
+  /// (credit-card / smartphone / building-2 / hash / bitcoin / truck).
+  icon        String
+  isActive    Boolean             @default(true)
+  isPopular   Boolean             @default(false)
+  sortOrder   Int                 @default(0)
+  /// Per-method bag:
+  ///   CARD            → {} (gateway-driven; nothing here for now)
+  ///   MOBILE_MONEY    → { providers: [{ code, name, countries:[] }] }
+  ///   USSD            → { codes: { "Access Bank": "*901*000*[Amount]#", ... } }
+  ///   CRYPTO          → { wallets: [{ coin: 'BTC', address: '...', label? }] }
+  ///   PAY_ON_DELIVERY → { feeNgn: 500, cities: ['Lagos','Nairobi','Accra'] }
+  details     Json                @default("{}")
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+/// Tracker #46 — Customer-visible bank-transfer account. Multiple
+/// rows allowed; storefront picks the row matching the order's
+/// currency (and country if specified). Only one row per
+/// (currency, country) is needed in practice, but we don't enforce
+/// uniqueness so the admin can stage replacements.
+model PaymentBankAccount {
+  id            String  @id @default(cuid())
+  bankName      String
+  accountName   String
+  accountNumber String
+  /// ISO 4217 — drives which account is shown at checkout for the
+  /// order's currency. "NGN" for Naira accounts, "GHS" for Ghana, etc.
+  currency      String
+  /// Optional ISO-2 country restriction. Null = available for any
+  /// country (matched purely on currency).
+  country       String?
+  /// Free-form swift / sort code / bank instructions copy.
+  instructions  String?
+  isActive      Boolean @default(true)
+  sortOrder     Int     @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([isActive, currency])
+  @@index([currency, country])
+}
+
 model PaymentGatewayConfig {
   id          String   @id @default(cuid())
   // Stable code key that maps to a registered factory class.

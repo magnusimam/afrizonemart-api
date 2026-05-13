@@ -19,6 +19,7 @@ import {
 } from '@/modules/notifications/admin.routes';
 import { adminCustomFieldRoutes } from '@/modules/custom-fields/admin.routes';
 import { adminPaymentRoutes } from '@/modules/payments/admin.routes';
+import { adminPaymentMethodRoutes } from '@/modules/payment-methods/admin.routes';
 import { adminFeatureFlagRoutes } from '@/modules/feature-flags/admin.routes';
 import { adminBusinessRuleRoutes } from '@/modules/business-rules/admin.routes';
 import { adminCmsRoutes } from '@/modules/cms/admin.routes';
@@ -72,6 +73,7 @@ adminRouter.use('/notifications', requireCapability('notifications.write'), admi
 adminRouter.use('/email-templates', requireCapability('email-templates.write'), adminEmailTemplateRoutes);
 adminRouter.use('/custom-fields', requireCapability('custom-fields.write'), adminCustomFieldRoutes);
 adminRouter.use('/payment-gateways', requireCapability('payment-gateways.write'), adminPaymentRoutes);
+adminRouter.use('/payment-methods', requireCapability('payment-gateways.write'), adminPaymentMethodRoutes);
 adminRouter.use('/feature-flags', requireCapability('feature-flags.write'), adminFeatureFlagRoutes);
 adminRouter.use('/loyalty', requireCapability('loyalty.read'), adminLoyaltyRoutes);
 adminRouter.use('/business-rules', requireCapability('business-rules.write'), adminBusinessRuleRoutes);
