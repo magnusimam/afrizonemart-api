@@ -67,6 +67,13 @@ export const FEATURE_FLAG_REGISTRY: FeatureFlagDef[] = [
     defaultValue: true,
   },
   {
+    key: 'animated_success_delivery',
+    name: 'Animated delivery scene on /checkout/success',
+    description:
+      'Replaces the static green checkmark on the order-success page with a GSAP scene: an amber-cargo AZM truck drives in, rear doors open, a box hops out, a tick stamps on it. ~4.8s end-to-end. Default ON. Flip to OFF as an instant kill-switch if the scene regresses (GSAP issue, mobile layout bug, slow-device perf complaint) — customers immediately see the plain green check + "Order Confirmed" copy that the page used before. No redeploy needed. prefers-reduced-motion users always see the static end state.',
+    defaultValue: true,
+  },
+  {
     key: 'share_as_image',
     name: 'Share product as image (PDP)',
     description:
