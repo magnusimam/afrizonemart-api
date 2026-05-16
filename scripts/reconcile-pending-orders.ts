@@ -13,8 +13,18 @@
  */
 import { prisma } from '@/infra/prisma';
 import { reconcilePendingOrder } from '@/modules/payments/service';
+import { startLoyaltyEarnSubscriber } from '@/modules/loyalty/subscriber';
+import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
 
 async function run() {
+  /// 2026-05-16 — wire subscribers in this script's process so
+  /// order.paid / payment.failed events trigger loyalty earn +
+  /// customer emails the same way the in-process reconciliation
+  /// cron does. The first run of this script forgot this and the
+  /// flipped order's events fired with handlerCount=0.
+  startLoyaltyEarnSubscriber();
+  startNotificationDispatcher();
+
   const orders = await prisma.order.findMany({
     where: { status: 'PENDING_PAYMENT' },
     select: { id: true, orderNumber: true, total: true, createdAt: true },
