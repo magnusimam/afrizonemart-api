@@ -24,26 +24,26 @@ export interface FxSnapshot {
 }
 
 /** Fallback rates anchored to a 2026-04 snapshot. Only used if the
- * upstream call fails AND we have no cached row yet. */
+ * upstream call fails AND we have no cached row yet. Covers every
+ * currency used by the 54 African nations on the storefront plus
+ * diaspora targets (USD/EUR/GBP/CAD/AUD). Live rates come from
+ * open.er-api.com which already covers all of these — these
+ * constants only matter for cold-start when the upstream is down. */
 const FALLBACK: FxSnapshot = {
   base: 'NGN',
   rates: {
     NGN: 1,
-    USD: 0.00065,
-    EUR: 0.00060,
-    GBP: 0.00051,
-    KES: 0.084,
-    GHS: 0.0098,
-    ZAR: 0.012,
-    XAF: 0.39,
-    XOF: 0.39,
-    UGX: 2.4,
-    TZS: 1.7,
-    RWF: 0.87,
-    EGP: 0.032,
-    MAD: 0.0064,
-    CAD: 0.00089,
-    AUD: 0.00099,
+    // Diaspora
+    USD: 0.00065, EUR: 0.00060, GBP: 0.00051, CAD: 0.00089, AUD: 0.00099,
+    // African — sorted by code
+    AOA: 0.59, BIF: 1.9,  BWP: 0.0087, CDF: 1.8,   CVE: 0.066,
+    DJF: 0.115, DZD: 0.087, EGP: 0.032, ERN: 0.0098, ETB: 0.075,
+    GHS: 0.0098, GMD: 0.045, GNF: 5.6,  KES: 0.084, KMF: 0.295,
+    LRD: 0.123, LSL: 0.012, LYD: 0.0031, MAD: 0.0064, MGA: 2.95,
+    MRU: 0.026, MUR: 0.030, MWK: 1.13, MZN: 0.042, NAD: 0.012,
+    RWF: 0.87,  SCR: 0.0094, SDG: 0.39, SLE: 0.015, SOS: 0.37,
+    SSP: 2.85,  STN: 0.015, SZL: 0.012, TND: 0.002, TZS: 1.7,
+    UGX: 2.4,   XAF: 0.39,  XOF: 0.39, ZAR: 0.012, ZMW: 0.016,
   },
   fetchedAt: '2026-04-26T00:00:00.000Z',
 };
