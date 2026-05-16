@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import { LoyaltyTier } from '@prisma/client';
+import { LoyaltyTier, LoyaltyTransactionType } from '@prisma/client';
 import type { AuthedRequest } from '@/middleware/auth';
 import { HttpError } from '@/middleware/error-handler';
 import { prisma } from '@/infra/prisma';
@@ -58,8 +58,22 @@ export async function getMyLoyaltyHandler(
     select: { subtotal: true },
   });
   const rollingSpend = spendRows.reduce((sum, r) => sum + r.subtotal, 0);
+  /// 2026-05-16 — Phase 1 gamification: storefront uses the count to
+  /// project "how many more orders to reach next tier" from the
+  /// customer's actual average order value.
+  const rollingPaidOrders = spendRows.length;
 
   const tierProgress = computeTierProgress(account.currentTier, rollingSpend, cfg);
+
+  /// 2026-05-16 — surface the soonest-expiring coin batch so the
+  /// storefront can render a "30 coins expire on July 15" urgency
+  /// banner. Reads positive EARN / WELCOME_BONUS / REDEEM_REFUND /
+  /// positive-ADMIN_ADJUSTMENT rows with an expiresAt in the next
+  /// 30 days. Sums the rows that all expire on the same earliest
+  /// date so a customer who earned 12 coins three weeks ago and
+  /// 18 coins two weeks ago sees one banner per expiry date, not
+  /// two. Null when nothing is expiring soon.
+  const expiring = await soonestExpiringBatch(account.id);
 
   res.json({
     enrolled: true,
@@ -73,9 +87,56 @@ export async function getMyLoyaltyHandler(
     },
     transactions: account.transactions,
     rollingSpend,
+    rollingPaidOrders,
     tierProgress,
+    expiring,
     config: publicConfig(cfg),
   });
+}
+
+const EXPIRY_WARN_WINDOW_DAYS = 30;
+const POSITIVE_DELTA_TYPES: LoyaltyTransactionType[] = [
+  LoyaltyTransactionType.EARN,
+  LoyaltyTransactionType.WELCOME_BONUS,
+  LoyaltyTransactionType.REDEEM_REFUND,
+  LoyaltyTransactionType.ADMIN_ADJUSTMENT,
+];
+
+async function soonestExpiringBatch(
+  accountId: string,
+): Promise<{ coins: number; expiresAt: string } | null> {
+  const horizon = new Date();
+  horizon.setDate(horizon.getDate() + EXPIRY_WARN_WINDOW_DAYS);
+  /// Pull the SOONEST row, then sum every row that shares that
+  /// expiresAt timestamp (rare — most batches differ — but the
+  /// daily-cron-grouped EXPIRY logic is forgiving).
+  const soonest = await prisma.loyaltyTransaction.findFirst({
+    where: {
+      accountId,
+      type: { in: POSITIVE_DELTA_TYPES },
+      delta: { gt: 0 },
+      expiresAt: { not: null, lte: horizon, gt: new Date() },
+    },
+    orderBy: { expiresAt: 'asc' },
+    select: { expiresAt: true },
+  });
+  if (!soonest?.expiresAt) return null;
+
+  const sameDay = await prisma.loyaltyTransaction.aggregate({
+    where: {
+      accountId,
+      type: { in: POSITIVE_DELTA_TYPES },
+      delta: { gt: 0 },
+      expiresAt: soonest.expiresAt,
+    },
+    _sum: { delta: true },
+  });
+  const coins = sameDay._sum?.delta ?? 0;
+  if (coins <= 0) return null;
+  return {
+    coins,
+    expiresAt: soonest.expiresAt.toISOString(),
+  };
 }
 
 /// Strip out the admin-facing knobs from the config so the public
