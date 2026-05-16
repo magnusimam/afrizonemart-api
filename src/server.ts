@@ -42,6 +42,7 @@ import { startScheduledBlogCron } from '@/modules/blog/cron';
 import { startWebhookDispatcher } from '@/modules/webhooks/dispatcher';
 import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
 import { startAbandonedCartCron } from '@/modules/cart/abandoned-cron';
+import { startPaymentReconciliationCron } from '@/modules/payments/reconciliation-cron';
 import { ensureCoreCategories } from '@/infra/ensure-categories';
 
 /**
@@ -265,6 +266,12 @@ async function start() {
   startLoyaltyMaintenanceCron();
   startAbandonedCartCron();
   startScheduledBlogCron();
+  /// 2026-05-16 — third safety net for paid-but-not-flipped orders.
+  /// Every 5 min, re-verifies every PENDING_PAYMENT order against
+  /// its gateway. Worst-case latency for a paid order to flip to
+  /// PAID is bounded by this interval, even if both webhook and
+  /// post-redirect verify fail.
+  startPaymentReconciliationCron();
   app.listen(env.PORT, () => {
     logger.info('server.listening', {
       port: env.PORT,

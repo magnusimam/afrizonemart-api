@@ -132,22 +132,56 @@ export async function activeGateway(currency?: string): Promise<PaymentGateway> 
 }
 
 /**
- * Looks up a specific gateway by its config ID (or by provider key as
- * a legacy fallback). Used by the checkout picker which tells us which
- * one the customer chose.
+ * Resolve a `PaymentGateway` instance from whatever string is stored
+ * on `Payment.gateway`. Three lookup strategies tried in order:
+ *
+ *   1. Treat the string as a `PaymentGatewayConfig.id` (cuid) — used
+ *      by callers that pass the config row ID directly.
+ *   2. Treat the string as a `PaymentGatewayConfig.provider` key
+ *      (e.g. 'squad', 'flutterwave'). This is what
+ *      `Payment.gateway = gw.id` actually stores — the provider key,
+ *      not the config row ID. Without this lookup
+ *      `checkOrderPayment` / `verifyPayment` blew up in prod for
+ *      every payment because the id-as-pk lookup always missed and
+ *      the legacy env fallback wasn't configured.
+ *   3. Legacy: env-configured Squad from SQUAD_SECRET_KEY.
+ *
+ * Falls back to the StubGateway (with an assertion that crashes in
+ * prod) so a missing config doesn't silently swallow a real payment.
  */
 async function gatewayById(id: string): Promise<PaymentGateway> {
   if (id) {
-    const cfg = await prisma.paymentGatewayConfig.findUnique({ where: { id } });
-    if (cfg && cfg.isActive) {
+    /// 1. Try by primary key first (cuid). Cheapest lookup.
+    const byPk = await prisma.paymentGatewayConfig.findUnique({
+      where: { id },
+    });
+    if (byPk && byPk.isActive) {
       return buildGateway({
-        provider: cfg.provider,
-        environment: cfg.environment,
-        credentials: decryptCredentials(cfg.credentials as Record<string, unknown>),
+        provider: byPk.provider,
+        environment: byPk.environment,
+        credentials: decryptCredentials(byPk.credentials as Record<string, unknown>),
+      });
+    }
+
+    /// 2. Try by provider key. 2026-05-16 bugfix — Payment.gateway
+    /// is set to `gw.id` (e.g. 'squad'), which is the provider key,
+    /// NOT a config row id. Every verify/check-order call routed
+    /// through here was failing because we only tried the pk lookup
+    /// first, missed, and fell through to the env legacy or stub.
+    const byProvider = await prisma.paymentGatewayConfig.findFirst({
+      where: { provider: id, isActive: true },
+      orderBy: { priority: 'asc' },
+    });
+    if (byProvider) {
+      return buildGateway({
+        provider: byProvider.provider,
+        environment: byProvider.environment,
+        credentials: decryptCredentials(byProvider.credentials as Record<string, unknown>),
       });
     }
   }
-  // Legacy: callers used to pass 'squad' literally. Resolve via env.
+  /// 3. Legacy env fallback. Mostly dead path now that all installs
+  /// use the PaymentGatewayConfig table.
   if (id === 'squad' && env.SQUAD_SECRET_KEY && env.SQUAD_ENVIRONMENT) {
     return buildGateway({
       provider: 'squad',
@@ -212,12 +246,15 @@ export async function initPayment(orderId: string, userId: string) {
 export async function applyWebhookOutcome(
   outcome: WebhookOutcome,
   replayGuard?: WebhookReplayGuard,
+  /// 2026-05-16 — accepts 'reconciliation_cron' as a third source.
   /// Tracker #47 — where the call came from. The webhook controller
   /// passes 'gateway_webhook'; verifyPayment / checkOrderPayment pass
-  /// 'verify_redirect'. Plumbed through into the emitted order.paid /
-  /// payment.failed events so analytics + email subscribers can
+  /// 'verify_redirect'; the reconciliation cron passes
+  /// 'reconciliation_cron'. Plumbed through into the emitted
+  /// order.paid / payment.failed events so analytics + email
+  /// subscribers can
   /// distinguish "Squad told us" from "we asked Squad".
-  source: 'gateway_webhook' | 'verify_redirect' = 'gateway_webhook',
+  source: 'gateway_webhook' | 'verify_redirect' | 'reconciliation_cron' = 'gateway_webhook',
 ): Promise<{ acknowledged: boolean; reason?: string }> {
   if (outcome.status === 'IGNORED') return { acknowledged: false, reason: outcome.reason };
 
@@ -439,7 +476,7 @@ export async function checkOrderPayment(orderIdOrNumber: string, userId: string)
 
   const gw = await gatewayById(latest.gateway);
   const outcome = await gw.verify(latest.gatewayRef);
-  await applyWebhookOutcome(outcome);
+  await applyWebhookOutcome(outcome, undefined, 'verify_redirect');
 
   const fresh = await prisma.order.findFirst({
     where: { id: order.id },
@@ -448,5 +485,58 @@ export async function checkOrderPayment(orderIdOrNumber: string, userId: string)
   return {
     orderStatus: fresh?.status ?? order.status,
     orderNumber: fresh?.orderNumber ?? order.orderNumber,
+  };
+}
+
+/**
+ * 2026-05-16 — server-side reconciliation. Used by the
+ * payment-reconciliation cron + the one-off backfill script + the
+ * admin "re-verify" button. Same path as `checkOrderPayment` but
+ * without the user-ownership check (the caller is a server-side
+ * sweeper, not a customer).
+ *
+ * Returns `changed: true` when the order moved out of
+ * PENDING_PAYMENT as a result of this call. Idempotent: orders
+ * already in a terminal state return `changed: false` without
+ * hitting the gateway.
+ */
+export async function reconcilePendingOrder(
+  orderId: string,
+  source: 'reconciliation_cron' | 'admin' = 'reconciliation_cron',
+): Promise<{ changed: boolean; status: string }> {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      payments: { orderBy: { createdAt: 'desc' }, take: 1 },
+    },
+  });
+  if (!order) {
+    throw HttpError.notFound(`Order ${orderId} not found`);
+  }
+  if (order.status !== 'PENDING_PAYMENT') {
+    return { changed: false, status: order.status };
+  }
+  const latest = order.payments[0];
+  if (!latest || latest.status !== 'INITIATED') {
+    return { changed: false, status: order.status };
+  }
+  const gw = await gatewayById(latest.gateway);
+  const outcome = await gw.verify(latest.gatewayRef);
+  /// `applyWebhookOutcome` accepts `'admin'` only on the order.paid
+  /// branch; payment.failed uses the same two-source enum. For
+  /// admin-triggered reconciliation we still treat the underlying
+  /// signal as coming from the cron path so subscribers don't have
+  /// to special-case 'admin' on payment.failed.
+  const outcomeSource =
+    source === 'admin' ? 'reconciliation_cron' : source;
+  await applyWebhookOutcome(outcome, undefined, outcomeSource);
+  const fresh = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { status: true },
+  });
+  const newStatus = fresh?.status ?? order.status;
+  return {
+    changed: newStatus !== 'PENDING_PAYMENT',
+    status: newStatus,
   };
 }

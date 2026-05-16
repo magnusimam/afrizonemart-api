@@ -29,7 +29,7 @@ export interface EventMap {
     /// bank-transfer confirmation). Useful for analytics + so subscribers
     /// can branch ("admin-confirmed bank transfer" emails should look
     /// slightly different from "Squad webhook said yes").
-    source: 'gateway_webhook' | 'verify_redirect' | 'admin';
+    source: 'gateway_webhook' | 'verify_redirect' | 'admin' | 'reconciliation_cron';
   };
   /// Tracker #47 — terminal "payment didn't go through" signal. Fires
   /// when the gateway reports FAILED (or, in future, when a customer
@@ -43,7 +43,7 @@ export interface EventMap {
     /// customer's email + admin notification so we don't have to guess
     /// when a card BIN gets rejected.
     reason?: string | null;
-    source: 'gateway_webhook' | 'verify_redirect';
+    source: 'gateway_webhook' | 'verify_redirect' | 'reconciliation_cron';
   };
   'order.shipped': {
     orderId: string;
