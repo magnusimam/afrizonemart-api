@@ -37,6 +37,11 @@ export const registerBodySchema = z.object({
   /// explicitly ticks the box.
   marketingOptIn: z.boolean().optional(),
   smsOptIn: z.boolean().optional(),
+  /// 2026-05-16 Phase 2 — captured from `?ref=` on landing; passed
+  /// here when present. Loose validation (10-char-ish hex) so a
+  /// stale link doesn't fail signup; service silently ignores
+  /// unknown codes.
+  referralCode: z.string().trim().min(4).max(64).optional(),
 });
 export type RegisterBody = z.infer<typeof registerBodySchema>;
 
@@ -76,6 +81,14 @@ export const updateMeBodySchema = z
     /// unsubscribe path when the customer is signed in.
     marketingOptIn: z.boolean().optional(),
     smsOptIn: z.boolean().optional(),
+    /// 2026-05-16 Phase 2 — date-only birth date (ISO yyyy-mm-dd).
+    /// Stored as a UTC midnight timestamp; only month + day matter
+    /// for the birthday-bonus cron. Null clears.
+    birthDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use yyyy-mm-dd')
+      .nullable()
+      .optional(),
   })
   .strict();
 export type UpdateMeBody = z.infer<typeof updateMeBodySchema>;

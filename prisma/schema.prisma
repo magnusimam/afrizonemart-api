@@ -60,6 +60,24 @@ model User {
   failedLoginAttempts Int       @default(0)
   lastFailedLoginAt   DateTime?
   lockedUntil         DateTime?
+  /// 2026-05-16 — Phase 2 gamification. Date-only birth date; used
+  /// by the birthday-bonus cron to award tier-scaled coins on the
+  /// customer's birth-month. Captured via /account/profile after
+  /// they've opted in; never required.
+  birthDate           DateTime?
+  /// 2026-05-16 — Phase 2 gamification. Stable referral slug
+  /// assigned on signup. Used by the share link
+  /// `https://afrizonemart.com/?ref=<code>`. Indexed below for
+  /// the attribution lookup.
+  referralCode        String?   @unique
+  /// 2026-05-16 — points at the User who referred this account. Set
+  /// during signup when ?ref=<code> is present and the code matches
+  /// an existing user. Null for organic / direct signups.
+  referredByUserId    String?
+  referredBy          User?     @relation("UserReferrals", fields: [referredByUserId], references: [id], onDelete: SetNull)
+  referredUsers       User[]    @relation("UserReferrals")
+  referralsMade       Referral[] @relation("ReferralReferrer")
+  referralsReceived   Referral[] @relation("ReferralReferee")
   /// Tracker #48 — marketing consent flags. NDPR / GDPR foundation
   /// for every campaign + automation flow built on top of this.
   /// Defaults to false; existing users not grandfathered. Customer
@@ -104,6 +122,7 @@ model User {
 
   @@index([email])
   @@index([phone])
+  @@index([referredByUserId])
 }
 
 // -----------------------------------------------------------------
@@ -492,6 +511,10 @@ model Coupon {
   minSubtotal        Int? // require cart subtotal ≥ this
   maxUses            Int? // total uses across all customers
   maxUsesPerCustomer Int? // per-customer cap
+  /// 2026-05-16 — tier-gated coupons. When set, only customers whose
+  /// LoyaltyAccount.currentTier is >= this tier can apply the
+  /// coupon. Null = unrestricted (the default).
+  requiredTier       LoyaltyTier?
   startsAt           DateTime?
   endsAt             DateTime?
   isActive           Boolean    @default(true)
@@ -1629,7 +1652,19 @@ model LoyaltyAccount {
   coinBalance           Int                    @default(0)
   /// Cached tier. Recomputed daily by the cron based on rolling
   /// 12-month spend, and on-write when a paying order lands.
+  /// 2026-05-16 — tier is now monotonic: the cron upgrades but never
+  /// downgrades. Admin can downgrade manually with a reason (see
+  /// `tierProtected` + `lastDowngradedAt` below).
   currentTier           LoyaltyTier            @default(BLUE)
+  /// 2026-05-16 — true once the account has reached any tier; the
+  /// cron then never auto-downgrades. Set the first time `currentTier`
+  /// rises above BLUE. Reset only via admin manual downgrade.
+  tierProtected         Boolean                @default(false)
+  /// 2026-05-16 — set when an admin manually moves the customer to a
+  /// lower tier. The audit reason lives on a ledger row of type
+  /// ADMIN_ADJUSTMENT, not here; this column is a fast denorm "was
+  /// this account ever downgraded".
+  lastDowngradedAt      DateTime?
   /// Lifetime totals — only ever grow. Used on /account/rewards
   /// and for admin analytics.
   lifetimeCoinsEarned   Int                    @default(0)
@@ -1703,6 +1738,117 @@ model LoyaltyConfig {
   // ---- Expiry / window ----
   coinExpiryMonths         Int      @default(2)
   spendWindowMonths        Int      @default(12)
+  // ---- 2026-05-16 Phase 2 perks ----
+  /// Per-tier birthday-bonus coin amounts. Awarded on the
+  /// customer's birth-month by the birthday cron when User.birthDate
+  /// is set. 0 = disabled for that tier (Blue is 0 by default;
+  /// Gold/VIP/Ambassador/Dorime get progressively more).
+  birthdayBonusBlue        Int      @default(0)
+  birthdayBonusGold        Int      @default(50)
+  birthdayBonusVip         Int      @default(100)
+  birthdayBonusAmbassador  Int      @default(200)
+  birthdayBonusDorime      Int      @default(500)
+  /// Weekend earn-rate multiplier. Saturdays award `floor(earn * x)`
+  /// coins instead of `earn` for tiers in the
+  /// `weekendBoostTiers` list. 1.0 = disabled.
+  weekendEarnMultiplier    Float    @default(2.0)
+  /// Tiers eligible for the weekend boost. Defaults to VIP+.
+  /// Admin-editable so promotions ("Gold gets the boost this month")
+  /// don't require a deploy.
+  weekendBoostTiers        LoyaltyTier[] @default([VIP, AMBASSADOR, DORIME])
+  /// Per-referrer cap on successful referrals counted per calendar
+  /// month. Stops referral farming.
+  maxReferralsPerMonth     Int      @default(5)
+  /// Per-tier max coin payout cap for a single referral. The actual
+  /// payout is `min(cap, ceil(refereeFirstOrderSubtotal * referralPercent / 100))`.
+  referralCapBlue          Int      @default(50)
+  referralCapGold          Int      @default(100)
+  referralCapVip           Int      @default(200)
+  referralCapAmbassador    Int      @default(300)
+  referralCapDorime        Int      @default(500)
+  /// Percentage of the referee's first-paid-order subtotal that
+  /// becomes the referrer's coin payout (subject to the cap above).
+  /// 5 = 5%. Stored as integer percent; the earn calc divides.
+  referralPercent          Int      @default(5)
+  /// Days the referral payout is held after the referee's first paid
+  /// order. Lets the refund window clear before crediting the
+  /// referrer; reversed if the order is refunded inside this window.
+  referralHoldDays         Int      @default(14)
+  /// Days the referee's "₦500 off first order" coupon is valid.
+  refereeCouponValidDays   Int      @default(60)
+  /// NGN discount the referee gets on their first order (one-time
+  /// coupon generated at signup time, redeemable until the validity
+  /// window above).
+  refereeCouponNgn         Int      @default(500)
   updatedAt                DateTime @updatedAt
   updatedById              String?
+}
+
+/// 2026-05-16 — Phase 2 referral system. One row per (referrer,
+/// referee) pair. Created at signup-attribution time; moves through
+/// states as the referee places their first paid order and the
+/// hold window clears.
+///
+/// Anti-gaming invariants enforced by the service:
+///  - Referee user.id ≠ referrer user.id (no self-referral)
+///  - Referee email + phone (when known) differ from the referrer's
+///  - Per-month cap (`maxReferralsPerMonth`) is checked at payout
+///    time, not signup, so spam referrals don't block legitimate
+///    ones — they just don't pay out
+///  - PAYOUT_SCHEDULED rows that never paid out (because the
+///    referee's first order was refunded inside the hold window)
+///    flip to REVERSED
+enum ReferralStatus {
+  /// Referee signed up with the referrer's code. Nothing has paid
+  /// out yet. Referee gets a one-time coupon on first paid order
+  /// (created lazily, not stored here).
+  PENDING
+  /// Referee's first paid order has landed. Referrer's payout is
+  /// scheduled for `referralHoldDays` after `firstPaidOrderAt`.
+  PAYOUT_SCHEDULED
+  /// Cron has issued the referrer's coin payout. Terminal.
+  PAID_OUT
+  /// Referee's first paid order was refunded before the hold
+  /// cleared, or the referral was caught by the per-month cap, or
+  /// admin manually voided. Terminal.
+  REVERSED
+}
+
+model Referral {
+  id                   String         @id @default(cuid())
+  /// The customer who shared the link.
+  referrerUserId       String
+  referrer             User           @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  /// The customer who signed up via the link.
+  refereeUserId        String         @unique
+  referee              User           @relation("ReferralReferee", fields: [refereeUserId], references: [id], onDelete: Cascade)
+  /// Captured at signup so a later code change doesn't lose the
+  /// attribution.
+  referralCode         String
+  status               ReferralStatus @default(PENDING)
+  /// Referee's first PAID order. Null until the first paid order
+  /// lands; set by the order.paid subscriber.
+  firstPaidOrderId     String?
+  firstPaidOrderAt     DateTime?
+  /// Computed at payout-schedule time from the referee's first
+  /// order subtotal × config.referralPercent, capped by the
+  /// referrer's tier ceiling.
+  scheduledCoinPayout  Int?
+  /// When the cron should issue the payout. = firstPaidOrderAt +
+  /// referralHoldDays. Cron daily checks this.
+  scheduledPayoutAt    DateTime?
+  /// Set when the referrer's coins land. Points at the
+  /// LoyaltyTransaction row for traceability.
+  paidOutAt            DateTime?
+  payoutTransactionId  String?
+  /// Set when the referral is voided (refunded inside hold,
+  /// monthly cap hit, admin void). Includes the reason on the
+  /// audit log (not stored here to keep the table narrow).
+  reversedAt           DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([referrerUserId, status])
+  @@index([scheduledPayoutAt])
+  @@index([status])
 }

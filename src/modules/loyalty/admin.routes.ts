@@ -4,6 +4,7 @@ import { requireAuth } from '@/middleware/auth';
 import { requireCapability } from '@/middleware/require-capability';
 import {
   adjustAccountHandler,
+  downgradeAccountHandler,
   getAccountHandler,
   getConfigHandler,
   getOrCreateAccountByUserHandler,
@@ -48,6 +49,11 @@ adminLoyaltyRoutes.post(
   '/accounts/:id/adjust',
   requireCapability('loyalty.write'),
   asyncHandler(adjustAccountHandler),
+);
+adminLoyaltyRoutes.post(
+  '/accounts/:id/downgrade',
+  requireCapability('loyalty.write'),
+  asyncHandler(downgradeAccountHandler),
 );
 adminLoyaltyRoutes.get(
   '/accounts/by-user/:userId',

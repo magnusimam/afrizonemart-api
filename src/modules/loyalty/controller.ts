@@ -4,6 +4,10 @@ import type { AuthedRequest } from '@/middleware/auth';
 import { HttpError } from '@/middleware/error-handler';
 import { prisma } from '@/infra/prisma';
 import { getLoyaltyConfig, type LoyaltyConfigSnapshot } from './service';
+import {
+  getOrCreateRefereeCoupon,
+  getReferralSummary,
+} from './referral.service';
 
 /// GET /api/loyalty/me
 ///
@@ -155,6 +159,21 @@ function publicConfig(cfg: LoyaltyConfigSnapshot) {
     tier3VipThreshold: cfg.tier3VipThreshold,
     tier4AmbassadorThreshold: cfg.tier4AmbassadorThreshold,
     tier5DorimeThreshold: cfg.tier5DorimeThreshold,
+    /// 2026-05-16 Phase 2 — perk knobs surfaced to the storefront
+    /// so the PerksLadder shows live values when admin tunes them.
+    birthdayBonusBlue: cfg.birthdayBonusBlue,
+    birthdayBonusGold: cfg.birthdayBonusGold,
+    birthdayBonusVip: cfg.birthdayBonusVip,
+    birthdayBonusAmbassador: cfg.birthdayBonusAmbassador,
+    birthdayBonusDorime: cfg.birthdayBonusDorime,
+    referralCapBlue: cfg.referralCapBlue,
+    referralCapGold: cfg.referralCapGold,
+    referralCapVip: cfg.referralCapVip,
+    referralCapAmbassador: cfg.referralCapAmbassador,
+    referralCapDorime: cfg.referralCapDorime,
+    referralPercent: cfg.referralPercent,
+    referralHoldDays: cfg.referralHoldDays,
+    refereeCouponNgn: cfg.refereeCouponNgn,
   };
 }
 
@@ -205,4 +224,34 @@ function computeTierProgress(
     ngnUntilNextTier,
     percentToNextTier,
   };
+}
+
+/// GET /api/loyalty/referral-summary
+/// 2026-05-16 Phase 2 — powers the /account/refer page. Returns the
+/// customer's referral code (lazy-generated if absent), counts of
+/// pending/scheduled/paid referrals, and the live cap + percent +
+/// hold from the config so the page copy stays accurate when admin
+/// tunes the knobs.
+export async function getReferralSummaryHandler(
+  req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  if (!req.user) throw HttpError.unauthorized();
+  res.json(await getReferralSummary(req.user.id));
+}
+
+/// GET /api/loyalty/referral-coupon
+/// Returns the referee's one-time welcome coupon (₦500 off first
+/// order). Lazy-created — first call generates the row, subsequent
+/// calls return the same code. 404 if the user isn't a referee.
+export async function getRefereeCouponHandler(
+  req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  if (!req.user) throw HttpError.unauthorized();
+  const coupon = await getOrCreateRefereeCoupon(req.user.id);
+  if (!coupon) {
+    throw HttpError.notFound('No referee coupon available for this account.');
+  }
+  res.json(coupon);
 }

@@ -3,6 +3,10 @@ import { logger } from '@/infra/logger';
 import { awardCoinsForPaidOrder } from './earn';
 import { clawbackOnRefund } from './refund';
 import { awardWelcomeBonusOnSignup } from './welcome-bonus.service';
+import {
+  reverseReferralIfStillHeld,
+  scheduleReferralPayoutIfEligible,
+} from './referral.service';
 
 /**
  * Wire the loyalty event-bus subscribers. Called once at API boot
@@ -20,9 +24,17 @@ import { awardWelcomeBonusOnSignup } from './welcome-bonus.service';
 export function startLoyaltyEarnSubscriber(): void {
   eventBus.on('order.paid', async ({ orderId }) => {
     await awardCoinsForPaidOrder(orderId);
+    /// 2026-05-16 Phase 2 — schedule referral payout for the
+    /// referrer when this referee places their FIRST paid order.
+    /// Idempotent against repeat order.paid fires.
+    await scheduleReferralPayoutIfEligible(orderId);
   });
   eventBus.on('order.refunded', async ({ orderId, userId, amount }) => {
     await clawbackOnRefund({ orderId, userId, refundAmount: amount });
+    /// 2026-05-16 — void a still-held referral payout when the
+    /// referee's first paid order is refunded inside the hold
+    /// window. PAID_OUT rows are handled by loyalty.refund clawback.
+    await reverseReferralIfStillHeld(orderId);
   });
   /// 2026-05-16 bugfix — welcome bonus moved to signup. Was firing
   /// on first paid order; customers expected it at signup as the

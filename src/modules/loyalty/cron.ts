@@ -1,4 +1,4 @@
-import { LoyaltyTransactionType } from '@prisma/client';
+import { LoyaltyTier, LoyaltyTransactionType } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { logger } from '@/infra/logger';
 import {
@@ -6,6 +6,23 @@ import {
   getLoyaltyConfig,
   tierForSpend,
 } from './service';
+import {
+  runBirthdayBonusSweep,
+  runReferralPayouts,
+} from './referral.service';
+
+/// 2026-05-16 — rank helper so we can compare tiers as integers
+/// (upgrade-only comparison in the cron).
+function tierRank(tier: LoyaltyTier): number {
+  switch (tier) {
+    case LoyaltyTier.BLUE: return 0;
+    case LoyaltyTier.GOLD: return 1;
+    case LoyaltyTier.VIP: return 2;
+    case LoyaltyTier.AMBASSADOR: return 3;
+    case LoyaltyTier.DORIME: return 4;
+    default: return 0;
+  }
+}
 
 /**
  * Continental Rewards daily maintenance cron (Tracker #44 PR 4).
@@ -141,19 +158,27 @@ async function recomputeAllTiers(): Promise<{ accountsChecked: number; tiersChan
       accountsChecked += 1;
       const spend = spendMap.get(account.userId) ?? 0;
       const newTier = tierForSpend(spend, cfg);
-      if (newTier !== account.currentTier) {
+      /// 2026-05-16 Phase 2 — Magnus' rule: tier is monotonic. The
+      /// cron upgrades when spend qualifies; it NEVER downgrades.
+      /// Customers don't lose their tier passively. Admins downgrade
+      /// manually with a reason via /api/admin/loyalty/accounts/:id/downgrade.
+      if (tierRank(newTier) > tierRank(account.currentTier)) {
         await prisma.loyaltyAccount.update({
           where: { id: account.id },
-          data: { currentTier: newTier },
+          data: {
+            currentTier: newTier,
+            tierProtected: true, // once you climb, you keep it
+          },
         });
         tiersChanged += 1;
-        logger.info('loyalty.cron.tier_changed', {
+        logger.info('loyalty.cron.tier_upgraded', {
           accountId: account.id,
           from: account.currentTier,
           to: newTier,
           rollingSpend: spend,
         });
       }
+      // downgrade path intentionally removed — see comment above
     }
 
     cursor = page[page.length - 1].id;
@@ -173,12 +198,31 @@ async function sweep(): Promise<void> {
   try {
     const expiry = await expireOverdueCoins();
     const tiers = await recomputeAllTiers();
+    /// 2026-05-16 Phase 2 — fold the referral payouts + birthday
+    /// bonuses into the same daily sweep. Saves an extra cron
+    /// heartbeat; both are bounded work (<200 referrals + birthdays
+    /// per day at any realistic scale).
+    const referrals = await runReferralPayouts().catch((err) => {
+      logger.warn('loyalty.cron.referral_sweep_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { paid: 0, capped: 0, errored: 0 };
+    });
+    const birthdays = await runBirthdayBonusSweep().catch((err) => {
+      logger.warn('loyalty.cron.birthday_sweep_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { awarded: 0, skipped: 0, errored: 0 };
+    });
     logger.info('loyalty.cron.sweep_complete', {
       durationMs: Date.now() - startedAt,
       coinsExpired: expiry.coinsExpired,
       accountsExpired: expiry.accountsTouched,
       accountsChecked: tiers.accountsChecked,
       tiersChanged: tiers.tiersChanged,
+      referralsPaid: referrals.paid,
+      referralsCapped: referrals.capped,
+      birthdayBonusesAwarded: birthdays.awarded,
     });
   } catch (err) {
     logger.error('loyalty.cron.sweep_failed', {

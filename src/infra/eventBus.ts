@@ -99,6 +99,16 @@ export interface EventMap {
     userId: string;
     isCustomerVisible: boolean;
   };
+  /// 2026-05-16 — Phase 2 referral payout signal. Fires after the
+  /// loyalty cron credits a referrer's PAID_OUT row. Notification
+  /// dispatcher hooks here to email the referrer ("You earned X coins
+  /// for referring a friend"); analytics may also subscribe.
+  'referral.paid_out': {
+    referralId: string;
+    referrerUserId: string;
+    refereeUserId: string;
+    coins: number;
+  };
 }
 
 type Handler<K extends keyof EventMap> = (

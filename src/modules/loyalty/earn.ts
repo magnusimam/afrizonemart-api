@@ -1,4 +1,4 @@
-import { LoyaltyTransactionType } from '@prisma/client';
+import { LoyaltyTier, LoyaltyTransactionType } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { logger } from '@/infra/logger';
 import {
@@ -10,6 +10,31 @@ import {
   type LoyaltyConfigSnapshot,
 } from './service';
 import { issueWelcomeBonus } from './welcome-bonus.service';
+
+/// 2026-05-16 Phase 2 — tier ranking + weekend boost helpers.
+function tierRank(tier: LoyaltyTier): number {
+  switch (tier) {
+    case LoyaltyTier.BLUE: return 0;
+    case LoyaltyTier.GOLD: return 1;
+    case LoyaltyTier.VIP: return 2;
+    case LoyaltyTier.AMBASSADOR: return 3;
+    case LoyaltyTier.DORIME: return 4;
+    default: return 0;
+  }
+}
+
+/// Returns the earn multiplier for a paid-order on a given tier.
+/// Saturday × `weekendEarnMultiplier` for tiers in
+/// `weekendBoostTiers`; 1.0 otherwise.
+function weekendBoostMultiplier(
+  tier: LoyaltyTier,
+  cfg: LoyaltyConfigSnapshot,
+): number {
+  const isSaturday = new Date().getUTCDay() === 6;
+  if (!isSaturday) return 1.0;
+  if (!cfg.weekendBoostTiers.includes(tier)) return 1.0;
+  return cfg.weekendEarnMultiplier;
+}
 
 /**
  * Continental Rewards earn flow (PR 2).

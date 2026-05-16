@@ -27,6 +27,26 @@ const configPatchSchema = z
     minRedeemCoins: z.number().int().min(1).max(1000000),
     coinExpiryMonths: z.number().int().min(1).max(120),
     spendWindowMonths: z.number().int().min(1).max(120),
+    /// 2026-05-16 Phase 2 perks
+    birthdayBonusBlue: z.number().int().min(0).max(100000),
+    birthdayBonusGold: z.number().int().min(0).max(100000),
+    birthdayBonusVip: z.number().int().min(0).max(100000),
+    birthdayBonusAmbassador: z.number().int().min(0).max(100000),
+    birthdayBonusDorime: z.number().int().min(0).max(100000),
+    weekendEarnMultiplier: z.number().min(1).max(10),
+    weekendBoostTiers: z.array(
+      z.enum(['BLUE', 'GOLD', 'VIP', 'AMBASSADOR', 'DORIME']),
+    ),
+    maxReferralsPerMonth: z.number().int().min(0).max(1000),
+    referralCapBlue: z.number().int().min(0).max(100000),
+    referralCapGold: z.number().int().min(0).max(100000),
+    referralCapVip: z.number().int().min(0).max(100000),
+    referralCapAmbassador: z.number().int().min(0).max(100000),
+    referralCapDorime: z.number().int().min(0).max(100000),
+    referralPercent: z.number().int().min(0).max(100),
+    referralHoldDays: z.number().int().min(0).max(365),
+    refereeCouponValidDays: z.number().int().min(1).max(365),
+    refereeCouponNgn: z.number().int().min(0).max(1000000),
   })
   .partial()
   .strict();
@@ -42,6 +62,13 @@ const accountIdParam = z.object({ id: z.string().min(1) });
 
 const adjustBodySchema = z.object({
   delta: z.number().int().refine((v) => v !== 0, 'delta cannot be zero'),
+  reason: z.string().trim().min(3).max(500),
+});
+
+/// 2026-05-16 Phase 2 — manual tier downgrade. Only admin path that
+/// can drop a tier; the cron + earn flow are upgrade-only.
+const downgradeBodySchema = z.object({
+  toTier: z.enum(['BLUE', 'GOLD', 'VIP', 'AMBASSADOR', 'DORIME']),
   reason: z.string().trim().min(3).max(500),
 });
 
@@ -175,6 +202,73 @@ export async function adjustAccountHandler(
   });
 
   res.status(201).json(tx);
+}
+
+/// POST /api/admin/loyalty/accounts/:id/downgrade
+/// 2026-05-16 Phase 2 — manual tier downgrade with mandatory
+/// reason. The only path that can drop a tier; the cron + earn
+/// flow upgrade-only since Magnus' rule that tiers stick once
+/// earned. Writes an ADMIN_ADJUSTMENT ledger row + AuditLog entry
+/// so the audit trail is complete.
+export async function downgradeAccountHandler(
+  req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  if (!req.user) throw HttpError.unauthorized();
+  const { id } = accountIdParam.parse(req.params);
+  const { toTier, reason } = downgradeBodySchema.parse(req.body);
+
+  const account = await prisma.loyaltyAccount.findUnique({ where: { id } });
+  if (!account) throw HttpError.notFound('Loyalty account not found.');
+
+  const fromTier = account.currentTier;
+  /// Refuse no-op or upward moves — admins use a separate "adjust"
+  /// path for upgrades (or just let the customer earn it naturally).
+  const rank = (t: string) =>
+    ['BLUE', 'GOLD', 'VIP', 'AMBASSADOR', 'DORIME'].indexOf(t);
+  if (rank(toTier) >= rank(fromTier)) {
+    throw HttpError.badRequest(
+      `Downgrade target ${toTier} is not below current tier ${fromTier}.`,
+    );
+  }
+
+  const updated = await prisma.loyaltyAccount.update({
+    where: { id },
+    data: {
+      currentTier: toTier,
+      lastDowngradedAt: new Date(),
+      /// Keep tierProtected=true so the cron still won't auto-
+      /// downgrade further from here. If admin wants to fully
+      /// reset back to "earned-from-zero", they downgrade to BLUE
+      /// — which is the natural floor anyway.
+    },
+  });
+
+  /// Write a zero-delta ADMIN_ADJUSTMENT ledger row so the
+  /// downgrade event is captured in the customer's activity log
+  /// next to coin adjustments. The customer's coin balance doesn't
+  /// change — only the tier moves.
+  await prisma.loyaltyTransaction.create({
+    data: {
+      accountId: id,
+      delta: 0,
+      balanceAfter: account.coinBalance,
+      type: LoyaltyTransactionType.ADMIN_ADJUSTMENT,
+      causeAdminId: req.user.id,
+      reason: `Tier downgraded ${fromTier} → ${toTier}: ${reason}`,
+    },
+  });
+
+  await logAudit({
+    actorUserId: req.user.id,
+    actorEmail: req.user.email,
+    entityType: 'LoyaltyAccount',
+    entityId: id,
+    action: 'tier_downgraded',
+    changes: { from: fromTier, to: toTier, reason },
+  });
+
+  res.json(updated);
 }
 
 /// GET /api/admin/loyalty/accounts/by-user/:userId

@@ -53,6 +53,24 @@ export interface LoyaltyConfigSnapshot {
   minRedeemCoins: number;
   coinExpiryMonths: number;
   spendWindowMonths: number;
+  // 2026-05-16 — Phase 2 perks
+  birthdayBonusBlue: number;
+  birthdayBonusGold: number;
+  birthdayBonusVip: number;
+  birthdayBonusAmbassador: number;
+  birthdayBonusDorime: number;
+  weekendEarnMultiplier: number;
+  weekendBoostTiers: LoyaltyTier[];
+  maxReferralsPerMonth: number;
+  referralCapBlue: number;
+  referralCapGold: number;
+  referralCapVip: number;
+  referralCapAmbassador: number;
+  referralCapDorime: number;
+  referralPercent: number;
+  referralHoldDays: number;
+  refereeCouponValidDays: number;
+  refereeCouponNgn: number;
 }
 
 /// Fetch the loyalty config singleton. Throws if missing — this
@@ -78,7 +96,53 @@ export async function getLoyaltyConfig(): Promise<LoyaltyConfigSnapshot> {
     minRedeemCoins: cfg.minRedeemCoins,
     coinExpiryMonths: cfg.coinExpiryMonths,
     spendWindowMonths: cfg.spendWindowMonths,
+    birthdayBonusBlue: cfg.birthdayBonusBlue,
+    birthdayBonusGold: cfg.birthdayBonusGold,
+    birthdayBonusVip: cfg.birthdayBonusVip,
+    birthdayBonusAmbassador: cfg.birthdayBonusAmbassador,
+    birthdayBonusDorime: cfg.birthdayBonusDorime,
+    weekendEarnMultiplier: cfg.weekendEarnMultiplier,
+    weekendBoostTiers: cfg.weekendBoostTiers,
+    maxReferralsPerMonth: cfg.maxReferralsPerMonth,
+    referralCapBlue: cfg.referralCapBlue,
+    referralCapGold: cfg.referralCapGold,
+    referralCapVip: cfg.referralCapVip,
+    referralCapAmbassador: cfg.referralCapAmbassador,
+    referralCapDorime: cfg.referralCapDorime,
+    referralPercent: cfg.referralPercent,
+    referralHoldDays: cfg.referralHoldDays,
+    refereeCouponValidDays: cfg.refereeCouponValidDays,
+    refereeCouponNgn: cfg.refereeCouponNgn,
   };
+}
+
+/// 2026-05-16 — per-tier helpers for the new perks.
+export function birthdayBonusForTier(
+  tier: LoyaltyTier,
+  cfg: LoyaltyConfigSnapshot,
+): number {
+  switch (tier) {
+    case LoyaltyTier.BLUE: return cfg.birthdayBonusBlue;
+    case LoyaltyTier.GOLD: return cfg.birthdayBonusGold;
+    case LoyaltyTier.VIP: return cfg.birthdayBonusVip;
+    case LoyaltyTier.AMBASSADOR: return cfg.birthdayBonusAmbassador;
+    case LoyaltyTier.DORIME: return cfg.birthdayBonusDorime;
+    default: return 0;
+  }
+}
+
+export function referralCapForTier(
+  tier: LoyaltyTier,
+  cfg: LoyaltyConfigSnapshot,
+): number {
+  switch (tier) {
+    case LoyaltyTier.BLUE: return cfg.referralCapBlue;
+    case LoyaltyTier.GOLD: return cfg.referralCapGold;
+    case LoyaltyTier.VIP: return cfg.referralCapVip;
+    case LoyaltyTier.AMBASSADOR: return cfg.referralCapAmbassador;
+    case LoyaltyTier.DORIME: return cfg.referralCapDorime;
+    default: return cfg.referralCapBlue;
+  }
 }
 
 /// Update the loyalty config singleton. Caller is responsible for

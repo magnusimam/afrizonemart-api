@@ -56,6 +56,25 @@ export async function evaluateCoupon(input: EvaluateInput): Promise<CouponEvalua
     }
   }
 
+  /// 2026-05-16 Phase 2 — tier-gated coupons. When admin sets a
+  /// `requiredTier` on the coupon, only customers whose loyalty tier
+  /// is at or above that level can apply it. Compared by ordinal so
+  /// "VIP-and-above" is a single setting.
+  if (coupon.requiredTier) {
+    const account = await prisma.loyaltyAccount.findUnique({
+      where: { userId: input.userId },
+      select: { currentTier: true },
+    });
+    const ranks = ['BLUE', 'GOLD', 'VIP', 'AMBASSADOR', 'DORIME'];
+    const haveRank = ranks.indexOf(account?.currentTier ?? 'BLUE');
+    const needRank = ranks.indexOf(coupon.requiredTier);
+    if (haveRank < needRank) {
+      throw HttpError.badRequest(
+        `This coupon is reserved for Continental ${coupon.requiredTier.toLowerCase()} members and above.`,
+      );
+    }
+  }
+
   return computeDiscount(coupon, input.subtotal);
 }
 
