@@ -49,7 +49,9 @@ export async function findProducts(query: ListProductsQuery) {
     const slugs = await categorySlugWithDescendants(query.category);
     where.category = { slug: { in: slugs } };
   }
-  if (query.origin) where.origin = query.origin.toUpperCase();
+  if (query.origin && query.origin.length > 0) {
+    where.origin = query.origin.length === 1 ? query.origin[0] : { in: query.origin };
+  }
   if (query.inStock !== undefined) where.inStock = query.inStock;
   if (query.onSale === true) where.comparePrice = { not: null };
   if (query.onSale === false) where.comparePrice = null;

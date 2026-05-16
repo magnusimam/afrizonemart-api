@@ -13,7 +13,23 @@ export const listProductsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(24),
   category: z.string().optional(),
-  origin: z.string().length(2).optional(),
+  /**
+   * ISO-3166 alpha-2 country code(s) to match against `Product.origin`.
+   * Accepts a single code (`?origin=NG`) or a CSV (`?origin=NG,KE,ZA`).
+   * Always returns `string[] | undefined` to the service layer so the
+   * repository can branch on `where.origin = code` vs `{ in: codes }`.
+   */
+  origin: z
+    .string()
+    .optional()
+    .transform((v) => {
+      if (!v) return undefined;
+      const codes = v
+        .split(',')
+        .map((s) => s.trim().toUpperCase())
+        .filter((s) => s.length === 2);
+      return codes.length > 0 ? codes : undefined;
+    }),
   q: z.string().optional(),
   inStock: z
     .enum(['true', 'false'])
