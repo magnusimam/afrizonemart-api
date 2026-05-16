@@ -9,6 +9,7 @@ import {
   tierForSpend,
   type LoyaltyConfigSnapshot,
 } from './service';
+import { issueWelcomeBonus } from './welcome-bonus.service';
 
 /**
  * Continental Rewards earn flow (PR 2).
@@ -84,29 +85,13 @@ export async function awardCoinsForPaidOrder(orderId: string): Promise<void> {
       return;
     }
 
-    // Welcome bonus? Account has zero ledger entries means brand-
-    // new — fire it now. Check the ledger rather than just
-    // `enrolledAt` because admin could have pre-created an account
-    // via the admin UI; the welcome bonus should fire when a real
-    // first paid order lands, not when an admin opens their drawer.
-    const hasAnyTransaction = await prisma.loyaltyTransaction.count({
-      where: { accountId: account.id },
-    });
-    if (hasAnyTransaction === 0 && cfg.welcomeBonusCoins > 0) {
-      await applyLoyaltyTransaction({
-        accountId: account.id,
-        delta: cfg.welcomeBonusCoins,
-        type: LoyaltyTransactionType.WELCOME_BONUS,
-        causeOrderId: orderId,
-        reason: 'First paid order — welcome to Continental Rewards',
-        expiresAt: expiryFromNow(cfg),
-      });
-      logger.info('loyalty.earn.welcome_bonus_awarded', {
-        orderId,
-        accountId: account.id,
-        amount: cfg.welcomeBonusCoins,
-      });
-    }
+    /// Welcome bonus fallback — moved to signup in the 2026-05-16
+    /// bugfix, but kept here for users who registered before that
+    /// change (their `user.registered` event fired before the new
+    /// subscriber existed). `issueWelcomeBonus` is idempotent on
+    /// "account has zero ledger entries" so a duplicate fire is
+    /// safe — the second call is a no-op.
+    await issueWelcomeBonus(order.userId, cfg);
 
     // Recompute tier off rolling-window spend *including* this
     // newly-paid order. This affects the per-order earn rate of THIS
