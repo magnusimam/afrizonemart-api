@@ -68,6 +68,13 @@ export async function adminListProducts(query: AdminListQuery) {
   if (query.category) where.category = { slug: query.category };
   if (query.origin) where.origin = query.origin;
   if (query.inStock !== undefined) where.inStock = query.inStock;
+  if (query.discounted === true) {
+    /// Field-to-field comparison via Prisma's fields helper.
+    /// "Currently discounted" means comparePrice is set AND strictly
+    /// greater than the live price — same rule the storefront uses to
+    /// decide whether to render the strike-through + discount badge.
+    where.comparePrice = { gt: prisma.product.fields.price };
+  }
   if (query.q) {
     where.OR = [
       { name: { contains: query.q, mode: 'insensitive' } },
