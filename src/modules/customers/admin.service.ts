@@ -55,6 +55,13 @@ function publicShape(user: User, stats: CustomerStats | undefined) {
 export async function adminListCustomers(query: AdminCustomerListQuery) {
   const where: Prisma.UserWhereInput = {};
   if (query.role) where.role = query.role;
+  if (query.segment === 'customers') {
+    /// Has placed at least one non-cancelled order — "actual customers".
+    where.orders = { some: { status: { not: 'CANCELLED' } } };
+  } else if (query.segment === 'users') {
+    /// Account exists, no qualifying purchase yet.
+    where.orders = { none: { status: { not: 'CANCELLED' } } };
+  }
   if (query.q) {
     where.OR = [
       { email: { contains: query.q, mode: 'insensitive' } },
