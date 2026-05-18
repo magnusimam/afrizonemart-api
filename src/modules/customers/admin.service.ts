@@ -1,10 +1,22 @@
-import type { Prisma, User } from '@prisma/client';
+import type { OrderStatus, Prisma, User } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
 import type {
   AdminCustomerListQuery,
   UpdateCustomerBody,
 } from './admin.schema';
+
+/// Order statuses that signify "the customer has paid". Used by the
+/// segment filter to distinguish real customers from accounts that
+/// just have abandoned-cart orders sitting in PENDING_PAYMENT.
+/// REFUNDED stays in the set on purpose — they did pay historically.
+const PAID_OR_AFTER: OrderStatus[] = [
+  'PAID',
+  'FULFILLING',
+  'SHIPPED',
+  'DELIVERED',
+  'REFUNDED',
+];
 
 interface CustomerStats {
   orderCount: number;
@@ -56,11 +68,16 @@ export async function adminListCustomers(query: AdminCustomerListQuery) {
   const where: Prisma.UserWhereInput = {};
   if (query.role) where.role = query.role;
   if (query.segment === 'customers') {
-    /// Has placed at least one non-cancelled order — "actual customers".
-    where.orders = { some: { status: { not: 'CANCELLED' } } };
+    /// "Paying customer" = at least one order that has actually been
+    /// paid for. PENDING_PAYMENT is just a cart that started checkout
+    /// and never completed — it does NOT count. CANCELLED never paid.
+    /// REFUNDED is included because they did pay at some point, even
+    /// if the money came back; historically they're still a customer.
+    where.orders = { some: { status: { in: PAID_OR_AFTER } } };
   } else if (query.segment === 'users') {
-    /// Account exists, no qualifying purchase yet.
-    where.orders = { none: { status: { not: 'CANCELLED' } } };
+    /// Account exists, no completed purchase yet (signed up, may have
+    /// items in their cart at PENDING_PAYMENT, but never finalised).
+    where.orders = { none: { status: { in: PAID_OR_AFTER } } };
   }
   if (query.q) {
     where.OR = [
