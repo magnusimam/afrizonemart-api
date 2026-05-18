@@ -105,6 +105,11 @@ model User {
   /// Image-update submissions this user has approved or rejected
   /// (admin/reviewer role).
   reviewedSubmissions     ProductImageSubmission[] @relation("InternSubmissionReviewer")
+  /// Payouts received as the intern contractor — one row per payday
+  /// covering many approved submissions.
+  payoutsReceived         InternPayout[]           @relation("InternPayoutContractor")
+  /// Payouts this user created in the admin UI.
+  payoutsCreated          InternPayout[]           @relation("InternPayoutCreator")
   /// Saved delivery addresses. The first one a customer creates is
   /// implicitly default; subsequent edits to `isDefault` are exclusive
   /// (only one address per user can be default at a time — enforced
@@ -1578,12 +1583,66 @@ model ProductImageSubmission {
   /// later rate change doesn't retroactively change what's owed for
   /// already-approved work.
   payRate         Int                   @default(0)
+  /// Set when this submission has been rolled into an InternPayout
+  /// (either still DRAFT or already PAID). Null = approved but not
+  /// yet attached to a payout → counts as "unpaid, payable". The
+  /// composite index below keeps the unpaid-approved query fast.
+  payoutId        String?
+  payout          InternPayout?         @relation(fields: [payoutId], references: [id], onDelete: SetNull)
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
 
   @@index([internId, status])
   @@index([productId])
   @@index([status, createdAt])
+  @@index([internId, status, payoutId])
+}
+
+// ------------------------------------------------------------------
+// Intern image-work payouts (Tracker #50, 2026-05-18)
+//
+// One InternPayout row per payday for one intern. Many approved
+// submissions roll into a payout via ProductImageSubmission.payoutId.
+//
+// Lifecycle:
+//   DRAFT    paidAt == null         — admin built the batch but money
+//                                     hasn't moved yet. Cancel returns
+//                                     the submissions to "unpaid" by
+//                                     nulling payoutId in a tx.
+//   PAID     paidAt != null         — admin marked the batch paid
+//                                     (off-platform bank/MM transfer)
+//                                     and recorded externalRef.
+//
+// `totalNgn` and `submissionCount` are SNAPSHOTS taken when the
+// draft is created. We don't recompute them later — that would
+// drift if a contributor edits payRate on an already-paid submission.
+// ------------------------------------------------------------------
+model InternPayout {
+  id              String                  @id @default(cuid())
+  internId        String
+  intern          User                    @relation("InternPayoutContractor", fields: [internId], references: [id], onDelete: Cascade)
+  /// Sum of payRate across every submission attached to this payout
+  /// at the time of draft creation. Frozen.
+  totalNgn        Int
+  /// Number of submissions covered. Denormalized for list rendering.
+  submissionCount Int
+  /// Window the admin used when generating the payout. Stored so
+  /// finance can reprint the CSV for a given payday.
+  windowFrom      DateTime?
+  windowTo        DateTime?
+  /// Set when the admin clicks "Mark paid". Null while still DRAFT.
+  paidAt          DateTime?
+  /// Bank transfer ID / Mobile Money reference / payment slip number.
+  externalRef     String?
+  /// Free-text note (e.g. "Paid via Kuda — May payroll").
+  note            String?
+  createdAt       DateTime                @default(now())
+  createdById     String?
+  createdBy       User?                   @relation("InternPayoutCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  submissions     ProductImageSubmission[]
+
+  @@index([internId, paidAt])
+  @@index([paidAt])
 }
 
 // ------------------------------------------------------------------
