@@ -28,6 +28,7 @@ import { adminShelfRoutes } from '@/modules/shelves/admin.routes';
 import { adminBlogRoutes } from '@/modules/blog/admin.routes';
 import { adminContentRoutes } from '@/modules/content/admin.routes';
 import { adminInternRoutes } from '@/modules/intern/admin.routes';
+import { adminInternPayoutRoutes } from '@/modules/payouts/routes';
 import { adminLoyaltyRoutes } from '@/modules/loyalty/admin.routes';
 
 /**
@@ -85,5 +86,7 @@ adminRouter.use('/content', requireCapability('content.write'), adminContentRout
 // admin UI), so we also let that capability through. The intern
 // module already has internal scoping by `assignedInternId`.
 adminRouter.use('/intern', adminInternRoutes);
+/// Intern payouts — ADMIN-only at the router level (see payouts/routes.ts).
+adminRouter.use('/intern-payouts', adminInternPayoutRoutes);
 adminRouter.use('/placements', requireCapability('placements.write'), adminPlacementsRoutes);
 adminRouter.use('/shelves', requireCapability('products.write'), adminShelfRoutes);

@@ -90,12 +90,25 @@ export async function getInternQueue(internId: string) {
           brandImageAlt: true,
           reviewedAt: true,
           createdAt: true,
+          /// Tracker #50 — when set, the approval has been rolled into
+          /// a payout (DRAFT or PAID). UI uses this to filter "Approved
+          /// (unpaid)" vs "Approved (paid)".
+          payoutId: true,
         },
       },
     },
   });
 
-  let stats = { todo: 0, pending: 0, approved: 0, rejected: 0 };
+  /// approved is the legacy total; approvedUnpaid / approvedPaid are
+  /// the new split that powers the "Show paid history" toggle.
+  let stats = {
+    todo: 0,
+    pending: 0,
+    approved: 0,
+    approvedUnpaid: 0,
+    approvedPaid: 0,
+    rejected: 0,
+  };
   const items = products.map((p) => {
     const latest = p.imageSubmissions[0] ?? null;
     let status: 'todo' | 'pending' | 'approved' | 'rejected' = 'todo';
@@ -108,6 +121,10 @@ export async function getInternQueue(internId: string) {
             : 'pending';
     }
     stats[status]++;
+    if (status === 'approved') {
+      if (latest?.payoutId) stats.approvedPaid++;
+      else stats.approvedUnpaid++;
+    }
     return {
       id: p.id,
       slug: p.slug,
@@ -279,20 +296,31 @@ export async function getInternSelfStats(internId: string) {
     prisma.product.count({ where: { assignedInternId: internId } }),
     prisma.productImageSubmission.findMany({
       where: { internId },
-      select: { status: true, payRate: true },
+      select: { status: true, payRate: true, payoutId: true },
     }),
     getDefaultPayRate(),
   ]);
 
   let approved = 0;
+  let approvedUnpaid = 0;
+  let approvedPaid = 0;
   let pending = 0;
   let rejected = 0;
   let earnedNgn = 0;
+  let unpaidEarnedNgn = 0;
+  let paidEarnedNgn = 0;
   let pendingNgn = 0;
   for (const s of submissions) {
     if (s.status === 'APPROVED') {
       approved += 1;
       earnedNgn += s.payRate;
+      if (s.payoutId) {
+        approvedPaid += 1;
+        paidEarnedNgn += s.payRate;
+      } else {
+        approvedUnpaid += 1;
+        unpaidEarnedNgn += s.payRate;
+      }
     } else if (s.status === 'PENDING_REVIEW') {
       pending += 1;
       pendingNgn += s.payRate;
@@ -303,10 +331,23 @@ export async function getInternSelfStats(internId: string) {
   const todo = Math.max(0, assignedCount - approved - pending - rejected);
 
   return {
-    stats: { todo, pending, approved, rejected, assigned: assignedCount },
+    stats: {
+      todo,
+      pending,
+      approved,
+      approvedUnpaid,
+      approvedPaid,
+      rejected,
+      assigned: assignedCount,
+    },
     earnings: {
       currentRateNgn: currentRate,
       earnedNgn,
+      /// Tracker #50 — split earnings into already-paid vs not-yet-paid.
+      /// The intern dashboard surfaces unpaidEarnedNgn as "Pending payday"
+      /// so contractors know what to expect at the next payout.
+      unpaidEarnedNgn,
+      paidEarnedNgn,
       pendingNgn,
     },
   };
