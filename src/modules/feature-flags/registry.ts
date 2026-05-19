@@ -80,4 +80,11 @@ export const FEATURE_FLAG_REGISTRY: FeatureFlagDef[] = [
       'Adds a "Share as image" item to the PDP share popover. Generates a 1080x1080 PNG card (navy + amber, product photo + price + brand) for sharing to WhatsApp / IG status / SMS; desktop downloads the PNG instead. Default OFF until smoke-tested in prod. Flip to OFF as an instant kill-switch if generation throws — the link-share targets in the same popover remain available. No redeploy needed.',
     defaultValue: false,
   },
+  {
+    key: 'sticky_pdp_buy_bar',
+    name: 'Mobile sticky Buy bar on PDP',
+    description:
+      'Mobile-only sticky bottom action bar on /product/<slug> that slides into view once the customer has scrolled past the inline Add-to-Cart row. Shows running subtotal + compact Add-to-Cart icon + Buy Now button. Standard mobile-commerce conversion pattern (Amazon, Shopify storefronts). Default ON. Flip to OFF as an instant kill-switch if the bar overlaps something or breaks on a specific device — the inline CTAs higher up the page remain fully functional. No redeploy needed.',
+    defaultValue: true,
+  },
 ];
