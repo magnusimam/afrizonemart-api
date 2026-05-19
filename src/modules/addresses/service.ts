@@ -93,6 +93,78 @@ export async function updateAddress(
   });
 }
 
+/**
+ * Tracker #52 (2026-05-19) — auto-save the shipping address used on
+ * a freshly-placed order. Called from `placeOrder` AFTER the order
+ * transaction commits (a failure here should never roll back a paid
+ * order; the catch site logs + swallows).
+ *
+ * Behaviour:
+ *  - First order for this user → create one address, marked default
+ *    (the existing `createAddress` first-row logic handles this).
+ *  - Subsequent order with a NEW address (no exact match) → save it
+ *    but DON'T mark default — preserves the customer's chosen
+ *    default. The list grows naturally on every order.
+ *  - Subsequent order using an address that exactly matches an
+ *    existing saved one → no-op. Avoids duplicating the saved list
+ *    every time they reuse the same address.
+ *
+ * Match is exact on the lowercased + trimmed quintuple
+ * (fullName, phone, addressLine, city, country). Fuzzy match isn't
+ * worth it here — typos in two consecutive orders produce two list
+ * entries, which the customer can clean up from /account/addresses.
+ */
+export async function autoSaveOrderAddress(
+  userId: string,
+  shipping: {
+    fullName: string;
+    phone: string;
+    addressLine: string;
+    city: string;
+    country: string;
+  },
+): Promise<void> {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const existing = await prisma.userAddress.findMany({
+    where: { userId },
+    select: {
+      fullName: true,
+      phone: true,
+      addressLine: true,
+      city: true,
+      country: true,
+    },
+  });
+  const target = {
+    fullName: norm(shipping.fullName),
+    phone: norm(shipping.phone),
+    addressLine: norm(shipping.addressLine),
+    city: norm(shipping.city),
+    country: norm(shipping.country),
+  };
+  const duplicate = existing.some(
+    (a) =>
+      norm(a.fullName) === target.fullName &&
+      norm(a.phone) === target.phone &&
+      norm(a.addressLine) === target.addressLine &&
+      norm(a.city) === target.city &&
+      norm(a.country) === target.country,
+  );
+  if (duplicate) return;
+
+  /// Pass isDefault: undefined so createAddress's first-row rule
+  /// applies — only the first ever address auto-marks default;
+  /// subsequent ones save without disturbing the existing default.
+  await createAddress(userId, {
+    fullName: shipping.fullName,
+    phone: shipping.phone,
+    addressLine: shipping.addressLine,
+    city: shipping.city,
+    country: shipping.country.toUpperCase(),
+    label: null,
+  });
+}
+
 export async function deleteAddress(userId: string, id: string) {
   // Verify ownership before deleting.
   const target = await getAddress(userId, id);

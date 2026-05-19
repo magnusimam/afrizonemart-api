@@ -11,6 +11,7 @@ import {
   validateCoinRedemption,
 } from '@/modules/loyalty/service';
 import { findOrder, findOrdersByUser } from './repository';
+import { autoSaveOrderAddress } from '@/modules/addresses/service';
 import type { PlaceOrderBody } from './order.schema';
 
 function newOrderNumber(): string {
@@ -239,6 +240,27 @@ export async function placeOrder(userId: string, body: PlaceOrderBody) {
     await tx.cart.update({ where: { id: cart.id }, data: { couponId: null } });
     return created;
   }, { timeout: 30_000, maxWait: 5_000 });
+
+  /// Tracker #52 — auto-save the shipping address to the customer's
+  /// saved-addresses list. Outside the order tx by design: a failure
+  /// here must not roll back a paid order. The helper is idempotent
+  /// (skips when the address already matches an existing saved one)
+  /// and marks the FIRST ever address as default automatically.
+  try {
+    await autoSaveOrderAddress(userId, {
+      fullName: body.shipping.fullName,
+      phone: body.shipping.phone,
+      addressLine: body.shipping.addressLine,
+      city: body.shipping.city,
+      country: body.shipping.country,
+    });
+  } catch (e) {
+    console.error('[orders] autoSaveOrderAddress failed', {
+      userId,
+      orderId: order.id,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 
   await eventBus.emit('order.placed', {
     orderId: order.id,
