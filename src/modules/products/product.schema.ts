@@ -39,6 +39,17 @@ export const listProductsQuerySchema = z.object({
     .enum(['true', 'false'])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
+  /// Storefront filter sidebar — min/max product price in Naira whole
+  /// units (matches `Product.price` storage). Either bound can be set
+  /// independently. Repository applies `where.price = { gte/lte }`.
+  minPrice: z.coerce.number().int().nonnegative().optional(),
+  maxPrice: z.coerce.number().int().nonnegative().optional(),
+  /// Storefront filter sidebar — minimum average review rating
+  /// (`Product.rating`, 0..5 inclusive). UI exposes 1..5 only; the
+  /// '5' bucket means "5.0 exact-or-near", which we treat as >= 4.5
+  /// so a 4.8-rated product still surfaces. Mirrored on the
+  /// frontend in FiltersSidebar.
+  minRating: z.coerce.number().min(0).max(5).optional(),
   /** Phase 10.7 — filter by placement key (e.g. "homepage_hero", "cms:black-friday"). */
   placement: z.string().optional(),
   /** Country scope used together with placement; ignored otherwise. */

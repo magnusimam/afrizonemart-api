@@ -55,6 +55,15 @@ export async function findProducts(query: ListProductsQuery) {
   if (query.inStock !== undefined) where.inStock = query.inStock;
   if (query.onSale === true) where.comparePrice = { not: null };
   if (query.onSale === false) where.comparePrice = null;
+  if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+    const priceFilter: Prisma.IntFilter = {};
+    if (query.minPrice !== undefined) priceFilter.gte = query.minPrice;
+    if (query.maxPrice !== undefined) priceFilter.lte = query.maxPrice;
+    where.price = priceFilter;
+  }
+  if (query.minRating !== undefined && query.minRating > 0) {
+    where.rating = { gte: query.minRating };
+  }
   if (query.q) {
     where.OR = [
       { name: { contains: query.q, mode: 'insensitive' } },
