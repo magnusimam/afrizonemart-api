@@ -506,6 +506,26 @@ export async function getInternProgress() {
     else if (g.status === 'REJECTED') rec.rejected = g._count._all;
   }
 
+  /// **Approved-AND-unpaid** count — i.e. submissions still claimable
+  /// in a new payout. `approved` (above) is the lifetime total which
+  /// includes work already rolled into past payouts; that's what the
+  /// /admin/interns leaderboard wants. The /admin/intern-payouts
+  /// dropdown needs *unpaid* — picking an intern with 0 unpaid would
+  /// just produce a "no submissions match" preview. Same query shape,
+  /// just adds `payoutId: null`.
+  const unpaidApprovedCounts = await prisma.productImageSubmission.groupBy({
+    by: ['internId'],
+    where: {
+      internId: { in: interns.map((i) => i.id) },
+      status: 'APPROVED',
+      payoutId: null,
+    },
+    _count: { _all: true },
+  });
+  const unpaidApprovedById = new Map(
+    unpaidApprovedCounts.map((g) => [g.internId, g._count._all]),
+  );
+
   // Filter to only show interns who actually have something assigned
   // OR have ever submitted — keeps the dashboard signal-to-noise high.
   const items = interns
@@ -522,6 +542,7 @@ export async function getInternProgress() {
         todo,
         pending: s.pending,
         approved: s.approved,
+        unpaidApproved: unpaidApprovedById.get(i.id) ?? 0,
         rejected: s.rejected,
       };
     })
