@@ -73,11 +73,81 @@ export class CloudflareImagesProvider implements BackgroundRemovalProvider {
     }
 
     const arrayBuffer = await res.arrayBuffer();
+    const buf = Buffer.from(arrayBuffer);
+
+    // **Critical validation** — Cloudflare's segment=foreground will
+    // happily return HTTP 200 + image/png even when the segmentation
+    // model couldn't separate the foreground (busy backgrounds,
+    // low-contrast products, model didn't load, zone doesn't have
+    // Cloudflare Images enabled, etc.). The output in that case is
+    // the **original image re-encoded as plain RGB PNG with no alpha
+    // channel** — we'd then cache that as if it were a cutout and the
+    // storefront's FloatingProduct path would render the original
+    // background floating awkwardly on the navy backdrop. (Audit
+    // 2026-05-19: Golden Penny Semovita was a textbook example —
+    // 0.0% transparent pixels, colorType=2 RGB.)
+    //
+    // Cheap heuristic: PNGs from a real segmentation are always
+    // either colorType 6 (RGBA) or colorType 3 (palette, with tRNS
+    // chunk — CF picks palette encoding precisely because the
+    // transparent regions compress well that way). A plain RGB PNG
+    // (colorType 2) or grayscale (colorType 0) means segmentation
+    // didn't actually run. Reject and let the service fall back to
+    // NoopProvider — the storefront renders InsetProduct (white
+    // panel) for those products, which looks intentional rather than
+    // broken.
+    if (!hasAlphaChannel(buf)) {
+      throw new Error(
+        `Cloudflare returned a no-alpha PNG for ${input.sourceUrl} — ` +
+          `segmentation likely failed silently. Falling back.`,
+      );
+    }
+
     return {
-      buffer: Buffer.from(arrayBuffer),
+      buffer: buf,
       contentType: 'image/png',
       isOriginal: false,
       provider: this.name,
     };
   }
+}
+
+/**
+ * Cheap PNG transparency check using only the IHDR + chunk header
+ * names — no PNG decoder needed.
+ *
+ * - PNG signature is 8 bytes at offset 0.
+ * - IHDR chunk starts at byte 8; color type lives at byte 25.
+ * - colorType 6 = RGBA (alpha plane) → has transparency.
+ * - colorType 4 = grayscale + alpha → has transparency.
+ * - colorType 3 = palette → may have transparency via tRNS chunk;
+ *   we scan the buffer for the literal 'tRNS' chunk-type marker.
+ *   Cloudflare's segment=foreground always emits tRNS when palette
+ *   encoded — without it, the palette encoding wouldn't be more
+ *   compact than RGB and CF would have chosen colorType 6 instead.
+ * - colorType 0/2 = grayscale/RGB without alpha → no transparency
+ *   possible.
+ *
+ * Exported for use by the service's cache-hit revalidation path.
+ */
+export function hasAlphaChannel(buf: Buffer): boolean {
+  if (buf.length < 33) return false;
+  // PNG magic: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buf[0] !== 0x89 ||
+    buf[1] !== 0x50 ||
+    buf[2] !== 0x4e ||
+    buf[3] !== 0x47
+  ) {
+    return false;
+  }
+  const colorType = buf[25];
+  if (colorType === 6 || colorType === 4) return true;
+  if (colorType === 3) {
+    // Look for the 'tRNS' chunk-type marker (4 ASCII bytes). It
+    // sits inside the first few KB of every palette PNG that has
+    // alpha. Using Buffer.indexOf is O(n) but n is tiny here.
+    return buf.indexOf(Buffer.from('tRNS', 'ascii')) !== -1;
+  }
+  return false;
 }

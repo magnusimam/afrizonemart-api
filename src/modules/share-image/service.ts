@@ -7,7 +7,7 @@ import { LocalDiskStorage } from '@/modules/uploads/storage/local-disk';
 import { R2Storage } from '@/modules/uploads/storage/r2';
 import type { UploadStorage } from '@/modules/uploads/storage/types';
 import { sniffImageMime } from '@/modules/uploads/sniff';
-import { CloudflareImagesProvider } from './providers/cloudflare-images';
+import { CloudflareImagesProvider, hasAlphaChannel } from './providers/cloudflare-images';
 import { NoopProvider } from './providers/noop';
 import { RemoveBgProvider } from './providers/remove-bg';
 import type { BackgroundRemovalProvider } from './providers/types';
@@ -89,12 +89,47 @@ function cutoutPublicUrl(key: string): string {
   return `${base}/${key}`;
 }
 
-async function urlIsLive(url: string): Promise<boolean> {
+/**
+ * Cache-hit validation.
+ *
+ * Audit 2026-05-19 found that some cached cutouts in R2 are actually
+ * the original image re-encoded as plain RGB PNG (no alpha) —
+ * Cloudflare's segment=foreground silently failed for products with
+ * complex backgrounds and we cached the response without checking
+ * whether segmentation actually ran. The fix in
+ * `CloudflareImagesProvider` prevents future bad writes, but existing
+ * cache objects need to be invalidated.
+ *
+ * Strategy: when we detect a cache hit, ALSO Range-fetch the first
+ * ~8KB of the cached PNG and run the same `hasAlphaChannel` check
+ * the provider now uses. If the bytes have no real transparency,
+ * we treat the cache as missing — the request falls through to the
+ * cache-miss branch which re-runs the provider (now with validation),
+ * regenerates a correct cutout (or falls back to noop on failure),
+ * and overwrites the bad cache object at the same R2 key.
+ *
+ * 8KB is enough to capture: PNG signature (8) + IHDR chunk (25) +
+ * optional sBIT/sRGB/iCCP/PLTE chunks + the tRNS chunk for palette
+ * PNGs (must precede IDAT). Real-world tRNS chunks always land
+ * well inside the first KB. We accept the tiny request as the cost
+ * of correctness; cache hits stay sub-100ms.
+ */
+async function urlIsLive(
+  url: string,
+): Promise<{ live: boolean; valid: boolean }> {
   try {
-    const res = await fetch(url, { method: 'HEAD' });
-    return res.ok;
+    const res = await fetch(url, {
+      headers: { Range: 'bytes=0-8191' },
+    });
+    // 200 (server didn't honour Range) or 206 (Partial Content) both
+    // mean the object exists; anything else is a miss.
+    if (res.status !== 200 && res.status !== 206) {
+      return { live: false, valid: false };
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { live: true, valid: hasAlphaChannel(buf) };
   } catch {
-    return false;
+    return { live: false, valid: false };
   }
 }
 
@@ -134,13 +169,26 @@ export async function getOrCreateCutoutForSlug(
   // re-generated cutout overwrites the cached object at the same R2
   // key, so subsequent normal requests pick up the new version
   // automatically.
-  if (!opts.force && (await urlIsLive(cachedUrl))) {
-    return {
-      url: cachedUrl,
-      isOriginal: false,
-      provider: 'cache',
-      cached: true,
-    };
+  if (!opts.force) {
+    const probe = await urlIsLive(cachedUrl);
+    if (probe.live && probe.valid) {
+      return {
+        url: cachedUrl,
+        isOriginal: false,
+        provider: 'cache',
+        cached: true,
+      };
+    }
+    if (probe.live && !probe.valid) {
+      // Cached but no alpha channel — this is the audit-2026-05-19
+      // case (Cloudflare returned a no-alpha PNG and we cached it).
+      // Fall through to the regenerate branch below; the result will
+      // overwrite the bad cache object at the same key.
+      logger.warn('share_image.cache_invalid_regenerating', {
+        slug,
+        cachedUrl,
+      });
+    }
   }
 
   // Cache miss — fetch the original, send to the removal provider,
