@@ -40,6 +40,31 @@ import { adminLoyaltyRoutes } from '@/modules/loyalty/admin.routes';
  */
 export const adminRouter = Router();
 
+// **`Cache-Control: no-store`** on every admin response.
+//
+// Why: 2026-05-20 we hit a customer-facing version of this — the
+// browser was holding a stale 404 in its HTTP cache from before an
+// endpoint existed (`/api/admin/intern-payouts`, mounted via PR #15)
+// and continued serving that 404 to the page even after the route
+// was deployed and responding 401. The user couldn't load the
+// payouts page until they hard-reloaded.
+//
+// Admin responses are never safe to cache:
+//   - The data is private (per-user, per-role).
+//   - It changes constantly (orders, inventory, payouts).
+//   - The error states (401 / 403 / 404) MUST always reflect the
+//     current server reality, never a stale snapshot.
+//
+// Setting `no-store` at the router level covers every sub-router
+// uniformly without requiring each one to remember. The header
+// rides on the response object so it ships with every status
+// code — including 401 redirects out of `requireRole` and 404s
+// from the catch-all notFoundHandler IF they pass through here.
+adminRouter.use((_req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  next();
+});
+
 // ADMIN gets the full admin surface; STAFF gets in here too but
 // each sub-router checks its specific capability against
 // `User.permissions[]` (audit H1). The frontend sidebar already
