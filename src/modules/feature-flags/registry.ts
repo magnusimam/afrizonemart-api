@@ -80,4 +80,11 @@ export const FEATURE_FLAG_REGISTRY: FeatureFlagDef[] = [
       'Adds a "Share as image" item to the PDP share popover. Generates a 1080x1080 PNG card (navy + amber, product photo + price + brand) for sharing to WhatsApp / IG status / SMS; desktop downloads the PNG instead. Default OFF until smoke-tested in prod. Flip to OFF as an instant kill-switch if generation throws — the link-share targets in the same popover remain available. No redeploy needed.',
     defaultValue: false,
   },
+  {
+    key: 'api_status_banner',
+    name: 'Storefront degradation banner',
+    description:
+      'Polls /api/health from the storefront layout (every 120s healthy, 30s degraded; paused when the tab is hidden) and shows a polite amber "we\'re experiencing a brief slowdown" banner if Railway is unreachable for two consecutive checks. Browsing still works because product fetches are served from Vercel\'s Data Cache for up to 60s after the API goes down; cart + checkout actions will fail and the banner sets the right expectation. Default ON. Flip to OFF as a kill-switch during planned deploys so the banner doesn\'t briefly flash during a rolling restart.',
+    defaultValue: true,
+  },
 ];
