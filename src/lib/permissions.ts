@@ -60,6 +60,10 @@ export type Capability =
   | 'coupons.write'
   | 'shipping.write'
   | 'payment-gateways.write'
+  /// Intern image-work payouts — list, preview, draft, finalize,
+  /// cancel. Granted to finance/payroll staff who shouldn't need the
+  /// rest of the admin surface to settle contractor pay.
+  | 'payouts.write'
   // People
   | 'customers.read'
   | 'customers.write'
@@ -101,6 +105,7 @@ export const CAPABILITY_LABELS: Record<Capability, { domain: string; label: stri
   'coupons.write': { domain: 'Commerce', label: 'Manage coupons & discounts' },
   'shipping.write': { domain: 'Commerce', label: 'Configure shipping zones & rates' },
   'payment-gateways.write': { domain: 'Commerce', label: 'Configure payment gateways' },
+  'payouts.write': { domain: 'Commerce', label: 'Manage intern payouts (settle contractor pay)' },
   // People
   'customers.read': { domain: 'People', label: 'View customers' },
   'customers.write': { domain: 'People', label: 'Edit customer profiles' },

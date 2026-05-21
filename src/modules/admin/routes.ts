@@ -111,7 +111,9 @@ adminRouter.use('/content', requireCapability('content.write'), adminContentRout
 // admin UI), so we also let that capability through. The intern
 // module already has internal scoping by `assignedInternId`.
 adminRouter.use('/intern', adminInternRoutes);
-/// Intern payouts — ADMIN-only at the router level (see payouts/routes.ts).
-adminRouter.use('/intern-payouts', adminInternPayoutRoutes);
+/// Intern payouts — gated by `payouts.write` so finance / payroll
+/// staff can settle contractor pay without needing the rest of the
+/// admin surface. ADMIN bypasses via the standard rule.
+adminRouter.use('/intern-payouts', requireCapability('payouts.write'), adminInternPayoutRoutes);
 adminRouter.use('/placements', requireCapability('placements.write'), adminPlacementsRoutes);
 adminRouter.use('/shelves', requireCapability('products.write'), adminShelfRoutes);
