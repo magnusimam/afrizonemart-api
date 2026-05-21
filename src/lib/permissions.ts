@@ -9,8 +9,37 @@
  *   - role=SELLER    → SELLER role-default capabilities
  *   - role=CUSTOMER  → none
  *
- * The same module exists at `afrizonemart-v2/src/lib/permissions.ts`
- * (kept manually in sync until we extract a shared workspace package).
+ * ╔════════════════════════════════════════════════════════════════════╗
+ * ║  SHIPPING A NEW ADMIN SECTION? READ THIS FIRST.                    ║
+ * ╠════════════════════════════════════════════════════════════════════╣
+ * ║  Adding a new admin page or feature WITHOUT a capability entry     ║
+ * ║  means it's either:                                                ║
+ * ║   (a) open to anyone with STAFF role (no gate), or                 ║
+ * ║   (b) ADMIN-only and never tickable for individual staff.          ║
+ * ║                                                                    ║
+ * ║  THE 3-STEP CHECKLIST for every new admin section:                 ║
+ * ║                                                                    ║
+ * ║  1. Add the capability to the `Capability` union below.            ║
+ * ║  2. Add a `CAPABILITY_LABELS` entry (domain + human label).        ║
+ * ║  3. Wrap the route with `requireCapability('your.cap')` in the     ║
+ * ║     module's routes.ts — this is the actual server-side gate.      ║
+ * ║                                                                    ║
+ * ║  That's it. The storefront's "Add staff" dialog and "Edit          ║
+ * ║  existing staff" matrix both fetch this list dynamically via       ║
+ * ║  `GET /api/admin/staff/permissions`. As soon as step 1+2 ships     ║
+ * ║  to prod, the new permission is **immediately tickable in both    ║
+ * ║  UIs** — no storefront redeploy needed for the checkbox to         ║
+ * ║  appear.                                                           ║
+ * ║                                                                    ║
+ * ║  Sidebar visibility is a separate concern: add a NAV entry in      ║
+ * ║  afrizonemart-v2/src/components/admin/AdminSidebar.tsx with the    ║
+ * ║  matching `cap:` key so the new section appears in the menu for    ║
+ * ║  users who have it ticked.                                         ║
+ * ║                                                                    ║
+ * ║  The storefront's `lib/permissions.ts` no longer mirrors this      ║
+ * ║  list — `Capability` is a loose `string` there. You don't need     ║
+ * ║  to touch it.                                                      ║
+ * ╚════════════════════════════════════════════════════════════════════╝
  */
 
 export type Capability =
