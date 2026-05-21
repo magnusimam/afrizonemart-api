@@ -50,6 +50,13 @@ export type Capability =
   /// Grants access only to the intern queue UI + image upload + submit.
   /// Does NOT grant edit access to product data.
   | 'products.image-only'
+  /// Catalog operations capability — approve/reject intern image
+  /// submissions, reassign work, view the leaderboard, set pay
+  /// rates. Distinct from `products.image-only` (intern side) and
+  /// `products.write` (full product editor) so an operations
+  /// teammate can review art without inheriting either.
+  /// Self-review is blocked at service-layer.
+  | 'intern.review'
   | 'categories.write'
   | 'reviews.moderate'
   | 'custom-fields.write'
@@ -95,6 +102,7 @@ export const CAPABILITY_LABELS: Record<Capability, { domain: string; label: stri
   'products.read': { domain: 'Catalog', label: 'View products' },
   'products.write': { domain: 'Catalog', label: 'Create / edit / delete products' },
   'products.image-only': { domain: 'Catalog', label: 'Upload product images (intern queue only)' },
+  'intern.review': { domain: 'Catalog', label: 'Approve / reject intern image submissions' },
   'categories.write': { domain: 'Catalog', label: 'Manage categories' },
   'reviews.moderate': { domain: 'Catalog', label: 'Moderate reviews' },
   'custom-fields.write': { domain: 'Catalog', label: 'Manage product custom fields' },

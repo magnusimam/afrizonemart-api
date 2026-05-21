@@ -584,12 +584,23 @@ export async function reviewSubmission(
 ) {
   const sub = await prisma.productImageSubmission.findUnique({
     where: { id: submissionId },
-    select: { id: true, productId: true, status: true },
+    select: { id: true, productId: true, status: true, internId: true },
   });
   if (!sub) throw HttpError.notFound('Submission not found');
   if (sub.status !== 'PENDING_REVIEW') {
     throw HttpError.badRequest(
       `Submission has already been ${sub.status === 'APPROVED' ? 'approved' : 'rejected'}.`,
+    );
+  }
+  /// Defense in depth: a reviewer can never approve their own
+  /// submission. The capability boundary should already keep
+  /// interns out of the review endpoint (they have
+  /// products.image-only, not intern.review), but this guard
+  /// protects against an admin accidentally granting both to one
+  /// account and against future regressions.
+  if (sub.internId === reviewerId) {
+    throw HttpError.forbidden(
+      "You can't review your own submission. Ask another reviewer to take it.",
     );
   }
 
