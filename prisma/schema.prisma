@@ -951,6 +951,18 @@ model Shelf {
   /// `country: null` means any country. Rows render in the order
   /// they appear in the array.
   countryRows Json?
+  /// Phase 11 — category-rule auto-fill. Array of category slugs
+  /// that source the shelf's products. When non-empty AND
+  /// countryRows is null, the shelf auto-fills with the latest
+  /// in-stock products from these categories (and their
+  /// subcategories — leaf-wins rule). Country-rule still wins when
+  /// both are set; explicit picks are the fallback.
+  ///
+  /// Scalable pattern for category-themed home shelves (Mobile
+  /// Phase 3): admin creates "Groceries" shelf with
+  /// categoryAutoFill: ["groceries"]; new products in that
+  /// category appear without admin re-curating.
+  categoryAutoFill String[] @default([])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

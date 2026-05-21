@@ -34,6 +34,11 @@ export const adminUpdateShelfSchema = z.object({
   /// rules and fall back to picks + fallback. Pass a non-empty array
   /// to switch the shelf into auto-fill mode.
   countryRows: z.array(countryRowSchema).nullable().optional(),
+  /// Phase 11 — category auto-fill. Array of category slugs; the
+  /// shelf fills with latest in-stock products from these categories
+  /// (and their subcategories). Pass `[]` to clear and fall back to
+  /// country-rule or picks.
+  categoryAutoFill: z.array(z.string().min(1).max(80)).max(20).optional(),
 });
 
 /// One product slot inside a shelf.

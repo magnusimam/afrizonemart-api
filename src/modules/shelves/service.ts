@@ -90,15 +90,19 @@ function parseCountryRows(
   return out.length > 0 ? out : null;
 }
 
-/// Public read — returns the shelf config + products to render. Two
-/// paths:
+/// Public read — returns the shelf config + products to render.
+/// Three modes evaluated in this order:
 ///   1. **Country-rule mode**: when `Shelf.countryRows` is set, the
 ///      result is the rows concatenated in order — `[ZA × N, NG × M, …]`.
-///      Picks + fallback are ignored. Auto-updates as the catalog
-///      grows; editor doesn't need to re-pick anything.
-///   2. **Pick mode** (default): explicit ProductPlacement rows in
-///      sortOrder, scoped by country. The fallback (if any) is applied
-///      by the storefront component, not here.
+///      Auto-updates as the catalog grows.
+///   2. **Category auto-fill mode**: when `Shelf.categoryAutoFill` is
+///      non-empty AND no country-rule, fills with the latest in-stock
+///      products from those categories (and their subcategories — the
+///      leaf-wins rule means products attach to leaves but a parent's
+///      auto-fill should include them via category-tree expansion).
+///      Phase 11 scalable pattern for category-themed shelves.
+///   3. **Pick mode** (default): explicit ProductPlacement rows in
+///      sortOrder, scoped by country.
 export async function readShelf(key: string, country?: string) {
   const shelf = await getShelfConfig(key);
   if (!shelf.enabled) return { shelf, items: [] as Awaited<ReturnType<typeof loadProducts>> };
@@ -150,7 +154,44 @@ export async function readShelf(key: string, country?: string) {
     return { shelf, items };
   }
 
-  // Mode 2 — explicit picks.
+  // Mode 2 — category auto-fill.
+  const categorySlugs = (
+    shelf as { categoryAutoFill?: string[] }
+  ).categoryAutoFill;
+  if (categorySlugs && categorySlugs.length > 0) {
+    /// Expand each requested slug to include its subcategories. Products
+    /// attach to leaves under the leaf-wins rule, so a request for
+    /// "groceries" needs the children too.
+    const matchedCats = await prisma.category.findMany({
+      where: {
+        OR: [
+          { slug: { in: categorySlugs } },
+          { parent: { slug: { in: categorySlugs } } },
+        ],
+      },
+      select: { id: true },
+    });
+    const categoryIds = matchedCats.map((c) => c.id);
+    if (categoryIds.length === 0) {
+      return { shelf, items: [] as Awaited<ReturnType<typeof loadProducts>> };
+    }
+    const products = await prisma.product.findMany({
+      where: {
+        categoryId: { in: categoryIds },
+        inStock: true,
+        /// Prefer products with images; the storefront's
+        /// PlacementOrFallbackGrid handles imageless gracefully but
+        /// home shelves look better with images.
+        NOT: { images: { isEmpty: true } },
+      },
+      orderBy: [{ createdAt: 'desc' }],
+      take: cap,
+      include: { category: true },
+    });
+    return { shelf, items: products };
+  }
+
+  // Mode 3 — explicit picks.
   const upperCountry = country?.toUpperCase();
   const now = new Date();
   const placements = await prisma.productPlacement.findMany({
@@ -312,6 +353,13 @@ export async function adminUpdateShelf(key: string, input: AdminUpdateShelfInput
       : normalisedRows && normalisedRows.length > 0
         ? (normalisedRows as Prisma.InputJsonValue)
         : Prisma.DbNull;
+  /// Phase 11 — categoryAutoFill normalisation: trim + lowercase
+  /// each slug. Empty array clears the mode (back to picks).
+  const normalisedCategories =
+    input.categoryAutoFill === undefined
+      ? undefined
+      : input.categoryAutoFill.map((s) => s.trim().toLowerCase()).filter(Boolean);
+
   const upserted = await prisma.shelf.upsert({
     where: { key },
     create: {
@@ -322,6 +370,9 @@ export async function adminUpdateShelf(key: string, input: AdminUpdateShelfInput
       cols: input.cols ?? seed.cols,
       enabled: input.enabled ?? seed.enabled,
       ...(rowsForDb !== undefined ? { countryRows: rowsForDb } : {}),
+      ...(normalisedCategories !== undefined
+        ? { categoryAutoFill: normalisedCategories }
+        : {}),
     },
     update: {
       ...(input.title !== undefined ? { title: input.title } : {}),
@@ -330,6 +381,9 @@ export async function adminUpdateShelf(key: string, input: AdminUpdateShelfInput
       ...(input.cols !== undefined ? { cols: input.cols } : {}),
       ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
       ...(rowsForDb !== undefined ? { countryRows: rowsForDb } : {}),
+      ...(normalisedCategories !== undefined
+        ? { categoryAutoFill: normalisedCategories }
+        : {}),
     },
   });
   return upserted;
