@@ -175,20 +175,36 @@ export async function readShelf(key: string, country?: string) {
     if (categoryIds.length === 0) {
       return { shelf, items: [] as Awaited<ReturnType<typeof loadProducts>> };
     }
-    const products = await prisma.product.findMany({
+    /// Prefer products with images (better visual on the shelf
+    /// card), but fall back to imageless if the category doesn't
+    /// have enough. Same pattern country-rule mode uses — keeps
+    /// shelves looking populated even when the catalog hasn't been
+    /// fully image-curated yet (e.g. books at launch).
+    const withImages = await prisma.product.findMany({
       where: {
         categoryId: { in: categoryIds },
         inStock: true,
-        /// Prefer products with images; the storefront's
-        /// PlacementOrFallbackGrid handles imageless gracefully but
-        /// home shelves look better with images.
         NOT: { images: { isEmpty: true } },
       },
       orderBy: [{ createdAt: 'desc' }],
       take: cap,
       include: { category: true },
     });
-    return { shelf, items: products };
+    const need = cap - withImages.length;
+    let withoutImages: typeof withImages = [];
+    if (need > 0) {
+      withoutImages = await prisma.product.findMany({
+        where: {
+          categoryId: { in: categoryIds },
+          inStock: true,
+          images: { isEmpty: true },
+        },
+        orderBy: [{ createdAt: 'desc' }],
+        take: need,
+        include: { category: true },
+      });
+    }
+    return { shelf, items: [...withImages, ...withoutImages] };
   }
 
   // Mode 3 — explicit picks.
