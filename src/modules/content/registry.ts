@@ -162,10 +162,35 @@ export const SITE_CONTENT_SLOTS: readonly SlotDef[] = [
 
 export const SLOT_KEYS = SITE_CONTENT_SLOTS.map((s) => s.key);
 
+/// Dynamic slot pattern — per-category hero slides on mobile.
+/// Mobile reads `content.category.<slug>.hero.slides` on the
+/// Category landing screen (see afrizonemart-mobile/src/screens/
+/// category/CategoryLandingScreen.tsx). Admin sets these via the
+/// `/admin/category-heroes` page; we accept any well-formed slug
+/// without pre-registering each one.
+///
+/// Pattern: lowercase letters, digits, hyphens. Matches the same
+/// slug regex used in admin.schema.ts.
+const CATEGORY_HERO_KEY_RE = /^content\.category\.[a-z0-9]+(?:-[a-z0-9]+)*\.hero\.slides$/;
+
 export function isKnownSlot(key: string): boolean {
-  return SLOT_KEYS.includes(key);
+  if (SLOT_KEYS.includes(key)) return true;
+  /// Per-category hero is a templated key family — match by regex
+  /// instead of pre-enumerating every category. The slug regex is
+  /// the same one the admin Category form enforces, so any valid
+  /// category slug works without registry updates.
+  if (CATEGORY_HERO_KEY_RE.test(key)) return true;
+  return false;
 }
 
 export function getSlot(key: string): SlotDef | undefined {
   return SITE_CONTENT_SLOTS.find((s) => s.key === key);
+}
+
+/// Extract the category slug from a per-category hero key, e.g.
+/// `content.category.beauty.hero.slides` → `beauty`. Returns null
+/// when the key doesn't match the pattern.
+export function categorySlugFromHeroKey(key: string): string | null {
+  const m = key.match(/^content\.category\.([a-z0-9-]+)\.hero\.slides$/);
+  return m ? m[1]! : null;
 }
