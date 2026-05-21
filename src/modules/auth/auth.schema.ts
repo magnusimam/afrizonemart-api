@@ -89,6 +89,17 @@ export const updateMeBodySchema = z
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use yyyy-mm-dd')
       .nullable()
       .optional(),
+    /// 2026-05-21 — self-service profile picture. The storefront +
+    /// mobile upload via POST /api/uploads/avatar (any authed user)
+    /// then PATCH the returned URL here. Must be on the same R2 host
+    /// we issued, so callers can't point avatarUrl at arbitrary URLs.
+    /// Pass null to clear.
+    avatarUrl: z
+      .string()
+      .url('Must be a valid URL')
+      .max(1024)
+      .nullable()
+      .optional(),
   })
   .strict();
 export type UpdateMeBody = z.infer<typeof updateMeBodySchema>;

@@ -32,6 +32,7 @@ const ALLOWED_FOLDERS = new Set([
   'about',
   'reviews',
   'sellers',
+  'avatars',
   'misc',
 ]);
 
