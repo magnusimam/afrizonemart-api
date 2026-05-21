@@ -87,4 +87,43 @@ export const FEATURE_FLAG_REGISTRY: FeatureFlagDef[] = [
       'Polls /api/health from the storefront layout (every 120s healthy, 30s degraded; paused when the tab is hidden) and shows a polite amber "we\'re experiencing a brief slowdown" banner if Railway is unreachable for two consecutive checks. Browsing still works because product fetches are served from Vercel\'s Data Cache for up to 60s after the API goes down; cart + checkout actions will fail and the banner sets the right expectation. Default ON. Flip to OFF as a kill-switch during planned deploys so the banner doesn\'t briefly flash during a rolling restart.',
     defaultValue: true,
   },
+
+  // ----- Mobile app kill-switches (S3 scalable pattern). Mobile
+  // app reads these via `useFlag()` at boot; flipping any to OFF
+  // hides the corresponding section globally without an app redeploy.
+  {
+    key: 'mobile_show_hero',
+    name: 'Mobile — show hero slider',
+    description:
+      'Kill-switch for the hero image slider at the top of the mobile Home screen. Default ON. Flip OFF as an instant kill-switch if a slide regresses or admin needs a slot empty without editing content overrides — customers immediately see Home without the hero, all other sections intact. No redeploy needed.',
+    defaultValue: true,
+  },
+  {
+    key: 'mobile_show_categories',
+    name: 'Mobile — show category chip row',
+    description:
+      "Kill-switch for the horizontal category chip row on the mobile Home screen. Default ON. Flip OFF if the /api/categories endpoint is regressing or admin is mid-rename — customers see Home without the chips, all other sections intact.",
+    defaultValue: true,
+  },
+  {
+    key: 'mobile_show_country_marquee',
+    name: 'Mobile — show country marquee',
+    description:
+      'Kill-switch for the "Shop by country" flag tile row on the mobile Home screen. Default ON. Flip OFF if the FEATURED_COUNTRY_CODES list needs a curation pause — customers see Home without the country row.',
+    defaultValue: true,
+  },
+  {
+    key: 'mobile_animations_enabled',
+    name: 'Mobile — animations master switch',
+    description:
+      'Reserved for the global animation kill-switch on mobile. Default ON. Flip OFF as a perf safety valve if an animation regression hits a specific device class.',
+    defaultValue: true,
+  },
+  {
+    key: 'mobile_show_kebab_menu',
+    name: 'Mobile — show PDP kebab menu',
+    description:
+      'Reserved for the kebab menu in the Grocery PDP hero. Default ON. Flip OFF if the share/report flow it opens regresses.',
+    defaultValue: true,
+  },
 ];
