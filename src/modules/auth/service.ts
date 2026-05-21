@@ -280,6 +280,7 @@ export async function updateMe(
           ? new Date(`${body.birthDate}T00:00:00.000Z`)
           : null,
       }),
+      ...(body.avatarUrl !== undefined && { avatarUrl: body.avatarUrl }),
     },
   });
 

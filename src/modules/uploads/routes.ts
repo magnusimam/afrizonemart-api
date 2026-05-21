@@ -40,10 +40,28 @@ function translateMulterError(handler: ReturnType<typeof upload.single>) {
 
 export const uploadRoutes = Router();
 
-// Auth + uploads.write capability. ADMIN passes by default. SELLER
-// gets it via role defaults. STAFF gets it via either an explicit
-// permission grant or the implicit one tied to products.image-only
-// (the intern image-update workflow).
+// Self-service avatar upload — any authenticated user. Hardcoded
+// to the `avatars` folder (controller checks `req.body.folder ??
+// req.query.folder` against ALLOWED_FOLDERS; we set it via query
+// here so a customer can't drop a file into `products/`). No
+// `uploads.write` capability needed — every signed-in user gets
+// to set their own profile picture.
+uploadRoutes.post(
+  '/avatar',
+  requireAuth,
+  translateMulterError(upload.single('file')),
+  (req, _res, next) => {
+    // Force the folder server-side regardless of what the client sent.
+    req.query.folder = 'avatars';
+    next();
+  },
+  asyncHandler(uploadHandler),
+);
+
+// Admin / staff / seller uploads. Auth + uploads.write capability.
+// ADMIN passes by default. SELLER gets it via role defaults. STAFF
+// gets it via either an explicit permission grant or the implicit
+// one tied to products.image-only (the intern image-update workflow).
 uploadRoutes.use(requireAuth, requireCapability('uploads.write'));
 
 uploadRoutes.post('/', translateMulterError(upload.single('file')), asyncHandler(uploadHandler));
