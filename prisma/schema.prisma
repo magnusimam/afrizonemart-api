@@ -135,17 +135,32 @@ model User {
 // module on the application side; the schema mirrors the domain).
 // -----------------------------------------------------------------
 
+/// Visual archetype that drives the per-category PDP treatment on
+/// the mobile app (and reserved for future web theming). Set by admin
+/// per category. Defaults to FASHION (the safest neutral layout).
+/// See `afrizonemart-mobile/src/lib/categoryArchetype.ts` for what
+/// each archetype renders on PDP — solid amber tile (GROCERY),
+/// gradient (FASHION), navy (WINE), warm cream (LIFESTYLE).
+enum CategoryArchetype {
+  GROCERY
+  WINE
+  LIFESTYLE
+  FASHION
+}
+
 model Category {
-  id        String     @id @default(cuid())
-  slug      String     @unique
+  id        String            @id @default(cuid())
+  slug      String            @unique
   name      String
   image     String?
   parentId  String?
-  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children  Category[] @relation("CategoryTree")
+  parent    Category?         @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Category[]        @relation("CategoryTree")
   products  Product[]
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  /// Drives the mobile PDP archetype routing.
+  archetype CategoryArchetype @default(FASHION)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
 
   @@index([parentId])
 }

@@ -11,6 +11,10 @@ interface PublicCategory {
   name: string;
   image: string | null;
   parentId: string | null;
+  /// Mobile PDP archetype routing — set per category by admin.
+  /// Mobile reads this verbatim; web ignores for now (no per-category
+  /// theming on storefront PDP yet).
+  archetype: 'GROCERY' | 'WINE' | 'LIFESTYLE' | 'FASHION';
   productCount: number;
   children: PublicCategory[];
 }
@@ -34,6 +38,7 @@ categoryRoutes.get(
         name: true,
         image: true,
         parentId: true,
+        archetype: true,
         _count: { select: { products: true } },
       },
     });
@@ -60,6 +65,7 @@ categoryRoutes.get(
         name: c.name,
         image: c.image,
         parentId: c.parentId,
+        archetype: c.archetype,
         productCount: totalById.get(c.id) ?? 0,
         children: [],
       });
