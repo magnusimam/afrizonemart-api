@@ -71,6 +71,9 @@ export async function adminCreateCategory(body: UpsertCategoryBody) {
       name: body.name,
       image: body.image ?? null,
       parentId: body.parentId ?? null,
+      /// archetype defaults to FASHION at the schema level. Admin
+      /// can override on create or edit.
+      ...(body.archetype !== undefined && { archetype: body.archetype }),
     },
   });
 }
@@ -111,6 +114,7 @@ export async function adminUpdateCategory(id: string, body: PartialCategoryBody)
       ...(body.name !== undefined && { name: body.name }),
       ...(body.image !== undefined && { image: body.image ?? null }),
       ...(body.parentId !== undefined && { parentId: body.parentId ?? null }),
+      ...(body.archetype !== undefined && { archetype: body.archetype }),
     },
   });
 }
