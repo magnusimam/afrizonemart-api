@@ -110,6 +110,10 @@ model User {
   payoutsReceived         InternPayout[]           @relation("InternPayoutContractor")
   /// Payouts this user created in the admin UI.
   payoutsCreated          InternPayout[]           @relation("InternPayoutCreator")
+  /// Full-product submissions this user has drafted (intern role).
+  productSubmissions      ProductSubmission[]      @relation("ProductSubmissionAuthor")
+  /// Full-product submissions this user has reviewed (reviewer role).
+  reviewedProductSubmissions ProductSubmission[]   @relation("ProductSubmissionReviewer")
   /// Saved delivery addresses. The first one a customer creates is
   /// implicitly default; subsequent edits to `isDefault` are exclusive
   /// (only one address per user can be default at a time — enforced
@@ -1667,9 +1671,80 @@ model InternPayout {
   createdById     String?
   createdBy       User?                   @relation("InternPayoutCreator", fields: [createdById], references: [id], onDelete: SetNull)
   submissions     ProductImageSubmission[]
+  /// Full-product submissions rolled into this payout (2026-05-24).
+  /// A payout can cover both image work and product work for one
+  /// intern in the same payday.
+  productSubmissions ProductSubmission[]
 
   @@index([internId, paidAt])
   @@index([paidAt])
+}
+
+// ------------------------------------------------------------------
+// Full-product intern submissions (2026-05-24)
+//
+// Interns with the `products.submit` capability can draft a complete
+// product (name, description, price, category, images, custom
+// fields) for review. A reviewer with `intern.review` approves —
+// which CREATES the live Product and stamps the submission payable —
+// or rejects with a reason for rework. Mirrors ProductImageSubmission
+// so the same review + payout machinery applies. Pay uses the same
+// flat `intern.pay_rate_ngn` Setting, snapshotted per submission.
+// ------------------------------------------------------------------
+model ProductSubmission {
+  id              String                @id @default(cuid())
+  internId        String
+  intern          User                  @relation("ProductSubmissionAuthor", fields: [internId], references: [id], onDelete: Cascade)
+  status          ImageSubmissionStatus @default(PENDING_REVIEW)
+
+  // --- Staged product fields (become the live Product on approval) ---
+  name            String
+  /// Intern-supplied or auto-slugified at submit time. Uniqueness is
+  /// only enforced on the real Product at approval, so two pending
+  /// drafts can share a slug until one is approved.
+  slug            String
+  brand           String?
+  shortDescription String?
+  description     String?
+  ingredients     String?
+  /// NGN whole units.
+  price           Int
+  comparePrice    Int?
+  /// 2-letter ISO origin.
+  origin          String?
+  weightKg        Float?
+  images          String[]              @default([])
+  /// Bundles / custom fields / specifications — same JSON shape the
+  /// Product.attributes column uses. Validated at approval time.
+  attributes      Json                  @default("{}")
+  /// Stored as the category SLUG; resolved to a category id when the
+  /// Product is created on approval (the category may not exist yet
+  /// at submit time if an admin is still setting up the tree).
+  categorySlug    String?
+
+  /// Filled when REJECTED so the intern sees what to fix.
+  rejectionReason String?
+  reviewedById    String?
+  reviewedBy      User?                 @relation("ProductSubmissionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+  /// The live Product created when this submission was approved.
+  /// Null while pending/rejected. Plain id (no FK) so deleting the
+  /// product later doesn't block — this is an audit trail.
+  createdProductId String?
+
+  /// Pay rate snapshot in NGN at submit time — same flat rate as
+  /// image submissions. Locked so later rate changes don't rewrite
+  /// owed pay. Consumed by the payout flow (PR 1b).
+  payRate         Int                   @default(0)
+  payoutId        String?
+  payout          InternPayout?         @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@index([internId, status])
+  @@index([status, createdAt])
+  @@index([internId, status, payoutId])
 }
 
 // ------------------------------------------------------------------

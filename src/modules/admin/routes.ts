@@ -28,6 +28,7 @@ import { adminShelfRoutes } from '@/modules/shelves/admin.routes';
 import { adminBlogRoutes } from '@/modules/blog/admin.routes';
 import { adminContentRoutes } from '@/modules/content/admin.routes';
 import { adminInternRoutes } from '@/modules/intern/admin.routes';
+import { adminProductSubmissionRoutes } from '@/modules/product-submissions/admin.routes';
 import { adminInternPayoutRoutes } from '@/modules/payouts/routes';
 import { adminLoyaltyRoutes } from '@/modules/loyalty/admin.routes';
 
@@ -111,6 +112,13 @@ adminRouter.use('/content', requireCapability('content.write'), adminContentRout
 // admin UI), so we also let that capability through. The intern
 // module already has internal scoping by `assignedInternId`.
 adminRouter.use('/intern', adminInternRoutes);
+/// Full-product intern submissions review — same `intern.review`
+/// capability as image-submission review, so one grant covers both.
+adminRouter.use(
+  '/product-submissions',
+  requireCapability('intern.review'),
+  adminProductSubmissionRoutes,
+);
 /// Intern payouts — gated by `payouts.write` so finance / payroll
 /// staff can settle contractor pay without needing the rest of the
 /// admin surface. ADMIN bypasses via the standard rule.
