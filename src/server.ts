@@ -38,6 +38,7 @@ import { seedRegisteredFlags } from '@/modules/feature-flags/service';
 import { blogRoutes } from '@/modules/blog/routes';
 import { contentRoutes } from '@/modules/content/routes';
 import { internRoutes } from '@/modules/intern/routes';
+import { productSubmissionRoutes } from '@/modules/product-submissions/routes';
 import { startScheduledBlogCron } from '@/modules/blog/cron';
 import { startWebhookDispatcher } from '@/modules/webhooks/dispatcher';
 import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
@@ -215,6 +216,10 @@ app.use('/api/flags', featureFlagRoutes);
 app.use('/api/pages', cmsRoutes);
 app.use('/api/blog', blogRoutes);
 app.use('/api/content', contentRoutes);
+/// Mount BEFORE /api/intern — the latter's catch-all gate is
+/// products.image-only, which would 403 a product.submit-only intern
+/// before this more-specific router runs. Express matches in order.
+app.use('/api/intern/product-submissions', productSubmissionRoutes);
 app.use('/api/intern', internRoutes);
 app.use('/api/fx', fxRoutes);
 app.use('/api/categories', categoryRoutes);

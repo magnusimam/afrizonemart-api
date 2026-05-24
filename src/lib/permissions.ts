@@ -50,6 +50,12 @@ export type Capability =
   /// Grants access only to the intern queue UI + image upload + submit.
   /// Does NOT grant edit access to product data.
   | 'products.image-only'
+  /// Intern capability to draft + submit FULL products (name,
+  /// description, price, fields) for review. Does NOT publish
+  /// directly — an `intern.review` reviewer approves, which creates
+  /// the live product. Separate from products.image-only so an
+  /// intern can do product entry without image work (or both).
+  | 'products.submit'
   /// Catalog operations capability — approve/reject intern image
   /// submissions, reassign work, view the leaderboard, set pay
   /// rates. Distinct from `products.image-only` (intern side) and
@@ -102,7 +108,8 @@ export const CAPABILITY_LABELS: Record<Capability, { domain: string; label: stri
   'products.read': { domain: 'Catalog', label: 'View products' },
   'products.write': { domain: 'Catalog', label: 'Create / edit / delete products' },
   'products.image-only': { domain: 'Catalog', label: 'Upload product images (intern queue only)' },
-  'intern.review': { domain: 'Catalog', label: 'Approve / reject intern image submissions' },
+  'products.submit': { domain: 'Catalog', label: 'Submit full products for review (intern)' },
+  'intern.review': { domain: 'Catalog', label: 'Approve / reject intern submissions' },
   'categories.write': { domain: 'Catalog', label: 'Manage categories' },
   'reviews.moderate': { domain: 'Catalog', label: 'Moderate reviews' },
   'custom-fields.write': { domain: 'Catalog', label: 'Manage product custom fields' },
