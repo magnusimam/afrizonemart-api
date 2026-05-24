@@ -292,14 +292,23 @@ export async function submitImages(
  * already-banked or already-submitted work.
  */
 export async function getInternSelfStats(internId: string) {
-  const [assignedCount, submissions, currentRate] = await Promise.all([
-    prisma.product.count({ where: { assignedInternId: internId } }),
-    prisma.productImageSubmission.findMany({
-      where: { internId },
-      select: { status: true, payRate: true, payoutId: true },
-    }),
-    getDefaultPayRate(),
-  ]);
+  const [assignedCount, submissions, productSubmissions, currentRate] =
+    await Promise.all([
+      prisma.product.count({ where: { assignedInternId: internId } }),
+      prisma.productImageSubmission.findMany({
+        where: { internId },
+        select: { status: true, payRate: true, payoutId: true },
+      }),
+      /// 2026-05-24 PR 1b — full-product submissions are payable work
+      /// too, at the same flat rate. Earnings combine both; counts are
+      /// surfaced separately so the dashboard can show image vs product
+      /// work distinctly.
+      prisma.productSubmission.findMany({
+        where: { internId },
+        select: { status: true, payRate: true, payoutId: true },
+      }),
+      getDefaultPayRate(),
+    ]);
 
   let approved = 0;
   let approvedUnpaid = 0;
@@ -328,6 +337,33 @@ export async function getInternSelfStats(internId: string) {
       rejected += 1;
     }
   }
+
+  /// Product submissions: roll earnings into the same money totals
+  /// (one payday covers both), but track counts in their own block.
+  let productApproved = 0;
+  let productApprovedUnpaid = 0;
+  let productApprovedPaid = 0;
+  let productPending = 0;
+  let productRejected = 0;
+  for (const s of productSubmissions) {
+    if (s.status === 'APPROVED') {
+      productApproved += 1;
+      earnedNgn += s.payRate;
+      if (s.payoutId) {
+        productApprovedPaid += 1;
+        paidEarnedNgn += s.payRate;
+      } else {
+        productApprovedUnpaid += 1;
+        unpaidEarnedNgn += s.payRate;
+      }
+    } else if (s.status === 'PENDING_REVIEW') {
+      productPending += 1;
+      pendingNgn += s.payRate;
+    } else if (s.status === 'REJECTED') {
+      productRejected += 1;
+    }
+  }
+
   const todo = Math.max(0, assignedCount - approved - pending - rejected);
 
   return {
@@ -340,12 +376,19 @@ export async function getInternSelfStats(internId: string) {
       rejected,
       assigned: assignedCount,
     },
+    /// Full-product submission counts (separate surface from image work).
+    productStats: {
+      pending: productPending,
+      approved: productApproved,
+      approvedUnpaid: productApprovedUnpaid,
+      approvedPaid: productApprovedPaid,
+      rejected: productRejected,
+    },
     earnings: {
       currentRateNgn: currentRate,
+      /// earnedNgn / unpaid / paid / pending now COMBINE image +
+      /// product work — payday settles both together.
       earnedNgn,
-      /// Tracker #50 — split earnings into already-paid vs not-yet-paid.
-      /// The intern dashboard surfaces unpaidEarnedNgn as "Pending payday"
-      /// so contractors know what to expect at the next payout.
       unpaidEarnedNgn,
       paidEarnedNgn,
       pendingNgn,
@@ -526,11 +569,48 @@ export async function getInternProgress() {
     unpaidApprovedCounts.map((g) => [g.internId, g._count._all]),
   );
 
+  /// 2026-05-24 PR 1b — full-product submissions are payable too.
+  /// Pull their status counts + unpaid-approved so the leaderboard
+  /// shows product work and the payouts dropdown's `unpaidApproved`
+  /// (claimable count) includes product-only interns.
+  const [productCountsByStatus, productUnpaidApproved] = await Promise.all([
+    prisma.productSubmission.groupBy({
+      by: ['internId', 'status'],
+      where: { internId: { in: interns.map((i) => i.id) } },
+      _count: { _all: true },
+    }),
+    prisma.productSubmission.groupBy({
+      by: ['internId'],
+      where: {
+        internId: { in: interns.map((i) => i.id) },
+        status: 'APPROVED',
+        payoutId: null,
+      },
+      _count: { _all: true },
+    }),
+  ]);
+  const productByIntern = new Map<string, { approved: number; pending: number; rejected: number }>();
+  for (const i of interns) {
+    productByIntern.set(i.id, { approved: 0, pending: 0, rejected: 0 });
+  }
+  for (const g of productCountsByStatus) {
+    const rec = productByIntern.get(g.internId);
+    if (!rec) continue;
+    if (g.status === 'APPROVED') rec.approved = g._count._all;
+    else if (g.status === 'PENDING_REVIEW') rec.pending = g._count._all;
+    else if (g.status === 'REJECTED') rec.rejected = g._count._all;
+  }
+  const productUnpaidApprovedById = new Map(
+    productUnpaidApproved.map((g) => [g.internId, g._count._all]),
+  );
+
   // Filter to only show interns who actually have something assigned
-  // OR have ever submitted — keeps the dashboard signal-to-noise high.
+  // OR have ever submitted (image or product) — keeps the dashboard
+  // signal-to-noise high.
   const items = interns
     .map((i) => {
       const s = subsByIntern.get(i.id) ?? { approved: 0, pending: 0, rejected: 0 };
+      const p = productByIntern.get(i.id) ?? { approved: 0, pending: 0, rejected: 0 };
       const assigned = assignedById.get(i.id) ?? 0;
       const todo = Math.max(0, assigned - s.approved - s.pending - s.rejected);
       return {
@@ -542,12 +622,28 @@ export async function getInternProgress() {
         todo,
         pending: s.pending,
         approved: s.approved,
-        unpaidApproved: unpaidApprovedById.get(i.id) ?? 0,
+        /// Combined claimable (image + product) — drives the payouts
+        /// intern dropdown so a product-only intern is still selectable.
+        unpaidApproved:
+          (unpaidApprovedById.get(i.id) ?? 0) + (productUnpaidApprovedById.get(i.id) ?? 0),
         rejected: s.rejected,
+        /// Product-submission counts (separate column on the leaderboard).
+        productPending: p.pending,
+        productApproved: p.approved,
+        productRejected: p.rejected,
       };
     })
-    .filter((i) => i.assigned > 0 || i.approved > 0 || i.pending > 0 || i.rejected > 0)
-    .sort((a, b) => b.approved - a.approved);
+    .filter(
+      (i) =>
+        i.assigned > 0 ||
+        i.approved > 0 ||
+        i.pending > 0 ||
+        i.rejected > 0 ||
+        i.productApproved > 0 ||
+        i.productPending > 0 ||
+        i.productRejected > 0,
+    )
+    .sort((a, b) => b.approved + b.productApproved - (a.approved + a.productApproved));
 
   return { items };
 }
