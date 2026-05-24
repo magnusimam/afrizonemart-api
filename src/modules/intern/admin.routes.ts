@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '@/middleware/async-handler';
-import { requireRole } from '@/middleware/require-role';
+import { requireCapability } from '@/middleware/require-capability';
 import {
   adminBulkAssignHandler,
   adminExportCsvHandler,
@@ -13,12 +13,16 @@ import {
 } from './controller';
 
 /// Admin endpoints for the intern image-update workflow. Mounted
-/// under /api/admin/intern. ADMIN-only — even a STAFF account with
-/// products.image-only must not be able to reassign work or approve
-/// their own submissions.
+/// under /api/admin/intern. Gated on `intern.review` — distinct from
+/// the intern's own `products.image-only` so an operations
+/// teammate can be granted approval rights without touching the
+/// intern's upload surface. ADMIN's firehose grants it for free.
+/// Self-review is blocked at the service layer (interns granted
+/// `products.image-only` will never also hold `intern.review`, but
+/// we still defend in depth).
 export const adminInternRoutes = Router();
 
-adminInternRoutes.use(requireRole('ADMIN'));
+adminInternRoutes.use(requireCapability('intern.review'));
 
 adminInternRoutes.get('/progress', asyncHandler(adminGetProgressHandler));
 adminInternRoutes.post('/bulk-assign', asyncHandler(adminBulkAssignHandler));
