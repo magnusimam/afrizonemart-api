@@ -107,18 +107,58 @@ function defaultAttributes(p: { price: number; comparePrice: number | null; name
   };
 }
 
-/** Pulls every column not in KNOWN_COLUMNS off a CSV row. Empty values
- *  are skipped (treated as "no opinion") so importing a sparse spreadsheet
- *  doesn't wipe attributes that already exist on the product. */
-function extractCustomAttributes(row: RawRow): Record<string, string> {
-  const out: Record<string, string> = {};
+/** Coerce a raw CSV string to the JSON shape a CustomFieldDef of the
+ *  given type expects. NUMBER → number (when finite), BOOLEAN → bool,
+ *  everything else stays a string. The storefront renderer tolerates
+ *  strings too, but storing the right primitive keeps the data clean
+ *  and makes future sorting/filtering on these fields possible. */
+function coerceForType(raw: string, type: string): string | number | boolean {
+  if (type === 'NUMBER') {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : raw;
+  }
+  if (type === 'BOOLEAN') {
+    const v = raw.toLowerCase();
+    if (TRUE_VALUES.has(v)) return true;
+    if (FALSE_VALUES.has(v)) return false;
+    return raw;
+  }
+  return raw;
+}
+
+/** Splits a CSV row's non-standard columns into two buckets:
+ *   - `promoted`: columns whose name exactly matches an active PRODUCT
+ *     CustomFieldDef key. These go to TOP-LEVEL `attributes[key]` so the
+ *     storefront's DynamicFieldList (which reads `attributes[def.key]`)
+ *     renders them. Values are type-coerced per the def.
+ *   - `custom`: everything else — stashed under
+ *     `attributes.customAttributes.<name>` as a holding area the admin
+ *     can later promote to a real def.
+ *
+ *  Header matching is exact (case-sensitive) by design — a column named
+ *  `publicationYear` will NOT match a def keyed `publication_year`; it
+ *  falls through to customAttributes and is reported in unknownColumns.
+ *
+ *  Empty values are skipped so a sparse spreadsheet doesn't wipe
+ *  attributes already on the product. */
+function splitCustomColumns(
+  row: RawRow,
+  defTypeByKey: Map<string, string>,
+): { promoted: Record<string, string | number | boolean>; custom: Record<string, string> } {
+  const promoted: Record<string, string | number | boolean> = {};
+  const custom: Record<string, string> = {};
   for (const [key, value] of Object.entries(row)) {
     if (!key || KNOWN_COLUMNS.has(key)) continue;
     const trimmed = value?.trim();
     if (!trimmed) continue;
-    out[key] = trimmed;
+    const defType = defTypeByKey.get(key);
+    if (defType) {
+      promoted[key] = coerceForType(trimmed, defType);
+    } else {
+      custom[key] = trimmed;
+    }
   }
-  return out;
+  return { promoted, custom };
 }
 
 export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult> {
@@ -133,11 +173,24 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
     throw HttpError.badRequest(`CSV parse error on row ${first.row}: ${first.message}`);
   }
 
-  // Names of columns the importer didn't recognise — surfaced in the
-  // result so the admin sees which fields ended up under
-  // `attributes.customAttributes`.
+  // Load active PRODUCT custom-field defs once. A CSV column whose name
+  // exactly matches one of these keys is "promoted" to a top-level
+  // `attributes[key]` (where the storefront reads it) instead of being
+  // stashed in the customAttributes holding area.
+  const productDefs = await prisma.customFieldDef.findMany({
+    where: { scope: 'PRODUCT', isActive: true },
+    select: { key: true, type: true },
+  });
+  const defTypeByKey = new Map(productDefs.map((d) => [d.key, d.type as string]));
+
+  // Names of columns the importer didn't recognise as a standard field
+  // AND that don't match a custom-field def — these are the ones that
+  // land under `attributes.customAttributes`. Columns matching a def are
+  // promoted to top level, so they're no longer "unknown".
   const headerFields = parsed.meta.fields ?? [];
-  const unknownColumns = headerFields.filter((h) => h && !KNOWN_COLUMNS.has(h));
+  const unknownColumns = headerFields.filter(
+    (h) => h && !KNOWN_COLUMNS.has(h) && !defTypeByKey.has(h),
+  );
 
   // Pre-load category slugs once. Mutable map so on-the-fly category /
   // subcategory creation (below) is reused for the rest of the import in
@@ -258,7 +311,12 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
       const description = row.description?.trim() || null;
       const ingredients = row.ingredients?.trim() || null;
 
-      const customAttributes = extractCustomAttributes(row);
+      // Split the row's non-standard columns: def-matching ones get
+      // promoted to top-level attributes; the rest stay in the
+      // customAttributes holding area.
+      const { promoted, custom: customAttributes } = splitCustomColumns(row, defTypeByKey);
+      const hasPromoted = Object.keys(promoted).length > 0;
+      const hasCustom = Object.keys(customAttributes).length > 0;
 
       const existing = await prisma.product.findUnique({
         where: { slug },
@@ -266,13 +324,14 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
       });
 
       // Attributes payload differs CREATE vs UPDATE:
-      //   - CREATE: write the full default template + any customAttributes from CSV.
+      //   - CREATE: write the full default template + promoted fields at
+      //     top level + any leftover customAttributes from CSV.
       //   - UPDATE: keep the existing attributes JSON intact (so hand-edited
-      //     bundles/features/specs/about survive a CSV refresh) and merge
-      //     in only the customAttributes from this row, overlaying keys.
+      //     bundles/features/specs/about survive a CSV refresh) and overlay
+      //     the promoted fields (top level) + customAttributes from this row.
       let attributesPayload: Prisma.InputJsonValue | undefined;
       if (existing) {
-        if (Object.keys(customAttributes).length > 0) {
+        if (hasPromoted || hasCustom) {
           const existingAttrs =
             existing.attributes && typeof existing.attributes === 'object' && !Array.isArray(existing.attributes)
               ? (existing.attributes as Record<string, unknown>)
@@ -285,14 +344,18 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
               : {};
           attributesPayload = {
             ...existingAttrs,
-            customAttributes: { ...existingCustom, ...customAttributes },
+            ...promoted,
+            ...(hasCustom
+              ? { customAttributes: { ...existingCustom, ...customAttributes } }
+              : {}),
           } as unknown as Prisma.InputJsonValue;
         }
       } else {
         const defaults = defaultAttributes({ price, comparePrice, name, description, brand, origin });
         attributesPayload = {
           ...defaults,
-          ...(Object.keys(customAttributes).length > 0 ? { customAttributes } : {}),
+          ...promoted,
+          ...(hasCustom ? { customAttributes } : {}),
         } as unknown as Prisma.InputJsonValue;
       }
 
