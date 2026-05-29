@@ -1,0 +1,26 @@
+# Image for the Railway cron service that runs the daily DB backup.
+# Separate from the main API container so adding postgresql-client
+# doesn't bloat (or risk) every API deploy.
+#
+# Build is intentionally tiny — alpine + node + postgres-client +
+# the one script + the prod node_modules subset needed for
+# @aws-sdk/client-s3.
+FROM node:20-alpine
+
+# pg_dump lives in postgresql-client. Forward-compatible with newer
+# server versions, so this image works against whatever Postgres
+# Railway runs (currently 16).
+RUN apk add --no-cache postgresql-client
+
+WORKDIR /app
+
+# Install only production dependencies. The cron script imports
+# @aws-sdk/client-s3 which is already a runtime dep of the API.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+
+# Only ship the script — no app code is needed by the cron.
+COPY scripts/backup-db-cloud.mjs ./scripts/
+
+# Cron service runs this once per scheduled tick and exits.
+CMD ["node", "scripts/backup-db-cloud.mjs"]
