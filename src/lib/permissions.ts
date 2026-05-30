@@ -95,6 +95,7 @@ export type Capability =
   // Operations
   | 'reports.read'
   | 'audit.read'
+  | 'analytics.read'
   | 'uploads.write'
   | 'settings.write'
   // Loyalty (Continental Rewards)
@@ -139,6 +140,7 @@ export const CAPABILITY_LABELS: Record<Capability, { domain: string; label: stri
   // Operations
   'reports.read': { domain: 'Operations', label: 'View sales & inventory reports' },
   'audit.read': { domain: 'Operations', label: 'View admin audit log' },
+  'analytics.read': { domain: 'Operations', label: 'View view-tracking analytics (trending, top products, viewer logs)' },
   'uploads.write': { domain: 'Operations', label: 'Upload images & assets' },
   'settings.write': { domain: 'Operations', label: 'Edit store settings' },
   // Loyalty (Continental Rewards)
