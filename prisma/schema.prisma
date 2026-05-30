@@ -122,6 +122,10 @@ model User {
   /// Customer wishlist — heart on PDP / product card adds a row,
   /// removes it on toggle. Surfaces on /account/wishlist.
   wishlist                WishlistItem[]           @relation("UserWishlist")
+  /// Product views the customer has logged via the PDP dwell tracker.
+  /// SetNull on user delete so we keep aggregate trending counts even
+  /// after an account is wiped.
+  productViews            ProductView[]
   /// Audit trail of price changes this user has made. Read-only
   /// from the User side; writes happen via applyPriceChange().
   priceChanges            ProductPriceChange[]     @relation("PriceChangedBy")
@@ -226,6 +230,10 @@ model Product {
   assignedIntern     User?                    @relation("ProductInternAssignee", fields: [assignedInternId], references: [id], onDelete: SetNull)
   imageSubmissions   ProductImageSubmission[]
   wishlistedBy       WishlistItem[]
+  /// Append-only dwell-time view log — powers the trending sort on
+  /// /api/products?sort=trending and the "For You" feed. A 90-day
+  /// retention cron prunes old rows.
+  views              ProductView[]
   /// Append-only audit trail of every price change. Every write
   /// path (inline edit, bulk re-price, CSV import, scheduled
   /// flip, manual single-product save, revert) routes through
@@ -255,6 +263,33 @@ model Review {
   updatedAt     DateTime @updatedAt
 
   @@index([productId])
+}
+
+/// Append-only product view log. Powers the trending sort + future
+/// "recently viewed" / collaborative-filter signals. One row per
+/// meaningful dwell (mobile PDP fires after ~2s on screen, deduped
+/// per (sessionId, productId) for 5 minutes on the API).
+///
+/// Retention: a cron prunes rows older than 90 days so the table
+/// stays bounded. Loss of 90+ day-old data is fine — trending only
+/// reads the last 7 days, and recent-viewed only the last 30.
+model ProductView {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Null for anonymous viewers — trending counts everyone but the
+  /// per-user "recently viewed" surface ignores rows without a user.
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// Anonymous session identifier (opaque UUID minted on first app
+  /// launch, stored client-side). Used for dedup so a single device's
+  /// reload-spam doesn't inflate trending counts. Not PII.
+  sessionId  String?
+  viewedAt   DateTime @default(now())
+
+  @@index([productId, viewedAt])
+  @@index([userId, viewedAt])
+  @@index([sessionId, viewedAt])
 }
 
 // -----------------------------------------------------------------

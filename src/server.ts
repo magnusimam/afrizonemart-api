@@ -30,6 +30,8 @@ import { categoryRoutes } from '@/modules/categories/routes';
 import { shelfRoutes } from '@/modules/shelves/routes';
 import { wishlistRoutes } from '@/modules/wishlist/routes';
 import { reviewRoutes } from '@/modules/reviews/routes';
+import { viewRoutes } from '@/modules/views/routes';
+import { startViewMaintenanceCron } from '@/modules/views/cron';
 import { shareImageRoutes } from '@/modules/share-image/routes';
 import { loyaltyRoutes } from '@/modules/loyalty/routes';
 import { startLoyaltyEarnSubscriber } from '@/modules/loyalty/subscriber';
@@ -202,6 +204,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/views', viewRoutes);
 app.use('/api/share-image', shareImageRoutes);
 app.use('/api/loyalty', loyaltyRoutes);
 app.use('/api/products', productRoutes);
@@ -279,6 +282,9 @@ async function start() {
   /// PAID is bounded by this interval, even if both webhook and
   /// post-redirect verify fail.
   startPaymentReconciliationCron();
+  /// Daily — prune ProductView rows older than 90 days. Keeps the
+  /// trending aggregate table bounded.
+  startViewMaintenanceCron();
   app.listen(env.PORT, () => {
     logger.info('server.listening', {
       port: env.PORT,
