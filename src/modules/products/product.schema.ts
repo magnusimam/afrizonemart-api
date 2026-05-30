@@ -71,7 +71,7 @@ export const listProductsQuerySchema = z.object({
       return cleaned.length > 0 ? cleaned.slice(0, 100) : undefined;
     }),
   sort: z
-    .enum(['featured', 'newest', 'price-asc', 'price-desc', 'rating'])
+    .enum(['featured', 'newest', 'price-asc', 'price-desc', 'rating', 'trending'])
     .default('featured'),
 });
 

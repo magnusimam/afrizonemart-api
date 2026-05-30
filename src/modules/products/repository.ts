@@ -1,7 +1,13 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { placementFilter } from '@/modules/placements/service';
+import { getTrendingProductIds } from '@/modules/views/service';
 import type { ListProductsQuery } from './product.schema';
+
+/// Trending sort window — recompute every read. 7 days is the sweet
+/// spot: long enough that low-traffic products still show up, short
+/// enough that yesterday's hot items don't dominate forever.
+const TRENDING_WINDOW_DAYS = 7;
 
 /**
  * Prisma queries for the Products module.
@@ -73,6 +79,59 @@ export async function findProducts(query: ListProductsQuery) {
   }
   if (query.placement) {
     Object.assign(where, placementFilter(query.placement, query.country?.toUpperCase()));
+  }
+
+  /// Trending sort short-circuits the image-priority dance below.
+  /// Trending products are by definition the ones customers are
+  /// already engaging with, so the "promote products with images"
+  /// safeguard isn't relevant here.
+  ///
+  /// Graceful degradation: if there aren't enough trending hits to
+  /// fill the page (early days, or the catalog just doesn't get
+  /// many views), pad with newest-in-stock so the feed never
+  /// looks empty.
+  if (query.sort === 'trending') {
+    const skip = (query.page - 1) * query.limit;
+    const take = query.limit;
+    const trendingIds = await getTrendingProductIds(
+      TRENDING_WINDOW_DAYS,
+      take + skip + 25, // overfetch so where-filters don't drain the list
+    );
+
+    /// Apply the rest of the filters to trending IDs.
+    const trendingRows = trendingIds.length
+      ? await prisma.product.findMany({
+          where: { ...where, id: { in: trendingIds } },
+          include: { category: true },
+        })
+      : [];
+    const byId = new Map(trendingRows.map((p) => [p.id, p]));
+    /// Restore the trending order returned by the views aggregator.
+    const trendingItems = trendingIds
+      .map((id) => byId.get(id))
+      .filter((p): p is NonNullable<typeof p> => Boolean(p));
+
+    /// Fill remainder with newest-in-stock that aren't already in
+    /// the trending bucket.
+    const excludeIds = trendingItems.map((p) => p.id);
+    const padNeeded = Math.max(0, take + skip - trendingItems.length);
+    const padItems =
+      padNeeded > 0
+        ? await prisma.product.findMany({
+            where: {
+              ...where,
+              ...(excludeIds.length ? { id: { notIn: excludeIds } } : {}),
+            },
+            orderBy: { createdAt: 'desc' },
+            take: padNeeded,
+            include: { category: true },
+          })
+        : [];
+
+    const combined = [...trendingItems, ...padItems];
+    const page = combined.slice(skip, skip + take);
+    const total = await prisma.product.count({ where });
+    return { items: page, total, page: query.page, limit: query.limit };
   }
 
   const orderBy: Prisma.ProductOrderByWithRelationInput = (() => {
