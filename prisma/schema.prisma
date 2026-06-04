@@ -132,10 +132,47 @@ model User {
   /// Continental Rewards account — 1:1, auto-created on first
   /// paid order. Null until enrollment.
   loyaltyAccount          LoyaltyAccount?          @relation("UserLoyalty")
+  /// Mobile push notification tokens registered to this user. One
+  /// row per device; sign-out deletes the row. Send path iterates
+  /// every row to fan out a single notification to all the
+  /// customer's devices.
+  pushTokens              PushToken[]
 
   @@index([email])
   @@index([phone])
   @@index([referredByUserId])
+}
+
+enum PushPlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+/// Per-device push notification token. One row per (user, token)
+/// pair — upsert on (token) since Expo regenerates the token on app
+/// reinstalls but the same device may flip between users (family
+/// sharing a tablet).
+///
+/// The send path picks `lastUsedAt` as the freshness signal — when
+/// it's older than 30 days the token is considered stale and we
+/// stop sending to it (FCM/APNs would 410-Gone anyway; this saves
+/// the round trip).
+model PushToken {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The Expo push token (`ExponentPushToken[...]`). Globally unique
+  /// — if another user signs in on the same device, the row is
+  /// re-assigned to them via upsert-on-token.
+  token       String       @unique
+  platform    PushPlatform
+  /// Updated on every successful send so we can prune stale tokens
+  /// without waiting for a delivery 410.
+  lastUsedAt  DateTime     @default(now())
+  createdAt   DateTime     @default(now())
+
+  @@index([userId])
 }
 
 // -----------------------------------------------------------------
