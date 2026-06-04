@@ -51,9 +51,17 @@ export interface EventMap {
     carrier?: string;
     trackingNumber?: string;
   };
+  'order.out_for_delivery': {
+    orderId: string;
+    userId: string;
+  };
   'order.delivered': {
     orderId: string;
     userId: string;
+    /// Who confirmed the delivery. `rider` = courier-scan path,
+    /// `customer` = customer tapped "I received it",
+    /// `admin` = admin status flip, `auto` = 14-day backstop cron.
+    source: 'rider' | 'customer' | 'admin' | 'auto';
   };
   'password.reset_requested': {
     userId: string;

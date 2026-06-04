@@ -3,6 +3,7 @@ import { eventBus } from '@/infra/eventBus';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
 import { logAudit } from '@/modules/audit/service';
+import { issueOrRefreshDeliveryToken } from '@/modules/courier/service';
 import type {
   AddNoteBody,
   AdminOrderListQuery,
@@ -19,7 +20,12 @@ const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   PENDING_PAYMENT: ['PAID', 'CANCELLED'],
   PAID: ['FULFILLING', 'CANCELLED', 'REFUNDED'],
   FULFILLING: ['SHIPPED', 'CANCELLED', 'REFUNDED'],
-  SHIPPED: ['DELIVERED', 'REFUNDED'],
+  /// SHIPPED → OUT_FOR_DELIVERY (new) is the canonical path for
+  /// Show & Scan. SHIPPED → DELIVERED stays valid so admins can
+  /// short-circuit on small / next-day deliveries that skip the
+  /// out-for-delivery hand-off.
+  SHIPPED: ['OUT_FOR_DELIVERY', 'DELIVERED', 'REFUNDED'],
+  OUT_FOR_DELIVERY: ['DELIVERED', 'SHIPPED', 'REFUNDED'],
   DELIVERED: ['REFUNDED'],
   CANCELLED: [],
   REFUNDED: [],
@@ -138,10 +144,19 @@ export async function adminUpdateStatus(
       orderId: id,
       userId: existing.userId,
     });
+  } else if (body.status === 'OUT_FOR_DELIVERY') {
+    /// Mint the delivery JWT + OTP now so the customer's QR can be
+    /// rendered as soon as their next refresh.
+    await issueOrRefreshDeliveryToken(id, existing.userId);
+    await eventBus.emit('order.out_for_delivery', {
+      orderId: id,
+      userId: existing.userId,
+    });
   } else if (body.status === 'DELIVERED') {
     await eventBus.emit('order.delivered', {
       orderId: id,
       userId: existing.userId,
+      source: 'admin',
     });
   } else if (
     /// Tracker #47 — when admin manually flips a PENDING_PAYMENT

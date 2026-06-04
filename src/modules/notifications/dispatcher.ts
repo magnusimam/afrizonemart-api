@@ -269,7 +269,11 @@ export function startNotificationDispatcher(): void {
   });
 
   // ---------- order.delivered → OrderDelivered ----------
-  eventBus.on('order.delivered', async ({ orderId }) => {
+  eventBus.on('order.delivered', async ({ orderId, source }) => {
+    /// Skip the "ask for a review" email for auto-mark backstop —
+    /// asking for a review of an order the customer never even
+    /// confirmed receiving looks broken.
+    if (source === 'auto') return;
     const order = await loadOrderForEmail(orderId);
     if (!order || !order.user.email) return;
 

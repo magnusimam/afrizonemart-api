@@ -19,7 +19,8 @@
 | `order.paid` | `payments/service.ts → applyWebhookOutcome` (status SUCCEEDED + order was PENDING_PAYMENT) | (a) Squad webhook hits us, OR (b) post-redirect `verifyPayment` poll returns SUCCEEDED, OR (c) admin manually flips `PENDING_PAYMENT → PAID` in `/admin/orders`. All three funnel through the same emitter so subscribers see one canonical signal. |
 | `payment.failed` | `payments/service.ts → applyWebhookOutcome` (status FAILED + order was PENDING_PAYMENT) | Squad webhook reports FAILED / ABANDONED, OR `verifyPayment` polls FAILED. Order stays PENDING_PAYMENT so the customer can retry. |
 | `order.shipped` | `orders/admin.service.ts` | Admin status change `PAID → SHIPPED`. |
-| `order.delivered` | `orders/admin.service.ts` | Admin status change `SHIPPED → DELIVERED`. |
+| `order.out_for_delivery` | `orders/admin.service.ts` | Admin status change `SHIPPED → OUT_FOR_DELIVERY`. Also writes a delivery JWT + 6-digit OTP onto Order so the customer's app can render the Show & Scan QR. |
+| `order.delivered` | `courier/service.ts → markDelivered()` | Single canonical write path — four upstream triggers funnel through here: (a) `confirmDeliveryFromCourier()` when a rider scans the QR or types the OTP, (b) `confirmDeliveryAsCustomer()` when the customer taps "I received it", (c) admin status flip in `/admin/orders`, (d) `autoMarkDelivered()` after 14d backstop cron. Event carries `source: 'rider' \| 'customer' \| 'admin' \| 'auto'` so subscribers can suppress noise for `auto`. |
 | `order.cancelled` | `orders/admin.service.ts` | Admin status change `* → CANCELLED`. |
 | `order.refunded` | `orders/admin.service.ts → adminRecordRefund()` | Admin records a refund (partial or full). |
 | `order.note_added` | `orders/admin.service.ts` | Admin adds an internal/customer note. |
@@ -32,7 +33,8 @@
 | `order.paid` | `OrderConfirmed` + `PaymentReceived` emails | `awardCoinsForPaidOrder` — coin earn + tier check + welcome bonus | yes | yes — `new_order_alert` template sent to every number in `ORDER_NOTIFY_WHATSAPP_TO` via Meta WhatsApp Cloud API (`whatsapp-dispatcher.ts`). Silently no-ops when env not set. | yes — "Payment received" to every registered push token for the customer (`push-dispatcher.ts`). |
 | `payment.failed` | `PaymentFailed` email (with gateway reason if any) | — | yes | — | yes — "Payment failed" |
 | `order.shipped` | `OrderShipped` email | — | yes | — | yes — "On the way" |
-| `order.delivered` | `OrderDelivered` email | — | yes | — | yes — "Delivered" |
+| `order.out_for_delivery` | — (no email today) | — | yes | — | yes — "Out for delivery — open the app when the rider arrives" |
+| `order.delivered` | `OrderDelivered` email — **skipped when `source: 'auto'`** so 14-day-backstop customers don't get a confused "your order arrived" email | — | yes | — | yes — "Delivered" — **skipped when `source: 'auto'`** |
 | `order.cancelled` | `OrderCancelled` email | — | yes | — | yes — "Order cancelled" |
 | `order.refunded` | `RefundIssued` email | `clawbackOnRefund` — REDEEM_REFUND always, REVERSAL on full refund | yes | — | — |
 | `order.note_added` | only if `isCustomerVisible: true`: planned future email (not wired) | — | yes |

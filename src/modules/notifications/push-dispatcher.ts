@@ -46,7 +46,26 @@ export function startPushDispatcher(): void {
     });
   });
 
-  eventBus.on('order.delivered', async ({ orderId }) => {
+  eventBus.on('order.out_for_delivery', async ({ orderId }) => {
+    const order = await loadOrderForPush(orderId);
+    if (!order) return;
+    /// Tap-deep-links to the OrderDetail screen which, with status
+    /// OUT_FOR_DELIVERY, shows the "Show your delivery code" CTA.
+    await sendToUser(order.userId, {
+      title: 'Out for delivery',
+      body: `Your order #${order.orderNumber} is on the way. Open the app when the rider arrives.`,
+      data: {
+        deepLink: `afrizonemart://order/${order.id}`,
+        type: 'order.out_for_delivery',
+      },
+    });
+  });
+
+  eventBus.on('order.delivered', async ({ orderId, source }) => {
+    /// Skip the celebratory push for auto-mark backstop — customer
+    /// who never confirmed shouldn't get a "Delivered 🎉" message
+    /// 14 days later, that would look broken.
+    if (source === 'auto') return;
     const order = await loadOrderForPush(orderId);
     if (!order) return;
     await sendToUser(order.userId, {
