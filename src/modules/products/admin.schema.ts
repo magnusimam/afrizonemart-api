@@ -57,6 +57,10 @@ export const adminListQuerySchema = z.object({
     .optional()
     .transform((v) => v?.toUpperCase()),
   inStock: z.enum(['true', 'false']).optional().transform((v) => (v === undefined ? undefined : v === 'true')),
+  /// When true, restrict to products that currently show a discount
+  /// (comparePrice > price). Powers the /admin/discounts page and the
+  /// "Discounted" filter chip on /admin/products.
+  discounted: z.enum(['true', 'false']).optional().transform((v) => (v === undefined ? undefined : v === 'true')),
   sort: z.enum(['newest', 'oldest', 'name-asc', 'price-desc']).default('newest'),
 });
 export type AdminListQuery = z.infer<typeof adminListQuerySchema>;
