@@ -5,6 +5,7 @@ const orderStatusEnum = z.enum([
   'PAID',
   'FULFILLING',
   'SHIPPED',
+  'OUT_FOR_DELIVERY',
   'DELIVERED',
   'CANCELLED',
   'REFUNDED',

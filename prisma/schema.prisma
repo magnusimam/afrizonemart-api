@@ -423,6 +423,10 @@ enum OrderStatus {
   PAID
   FULFILLING
   SHIPPED
+  /// 2026-06-04 — Show & Scan delivery confirmation. Set when ops
+  /// hands the parcel to the rider. Customer's app shows the QR /
+  /// OTP on this status; rider scan flips it to DELIVERED.
+  OUT_FOR_DELIVERY
   DELIVERED
   CANCELLED
   REFUNDED
@@ -494,6 +498,22 @@ model Order {
   // we can render "₦X refunded of ₦Y" without aggregating on every read.
   refundedTotal Int       @default(0)
   cancelledAt   DateTime?
+
+  /// 2026-06-04 — Show & Scan delivery confirmation. The signed JWT
+  /// the customer's app shows as a QR; the 6-digit OTP derived
+  /// from it (so the rider can type instead of scan). Both rotate
+  /// when ops re-flips status to OUT_FOR_DELIVERY. Cleared on
+  /// DELIVERED. See `modules/courier/tokens.ts`.
+  deliveryToken     String?
+  deliveryOtp       String?
+  /// Who confirmed the delivery — populated when status becomes
+  /// DELIVERED. Used by the auto-mark backstop to decide whether
+  /// to show the review prompt (skip when 'auto').
+  deliveredSource   String?
+  /// Timestamp delivery was confirmed. Mirrors the OrderEvent
+  /// createdAt for the DELIVERED transition; denormed so the
+  /// orders list can show "Delivered Jun 4, 14:32" without a join.
+  deliveredAt       DateTime?
 
   // Coupon snapshot at order time (code + discount in Naira). The full
   // coupon record is referenced via CouponRedemption for usage-cap
