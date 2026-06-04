@@ -45,6 +45,7 @@ import { productSubmissionRoutes } from '@/modules/product-submissions/routes';
 import { startScheduledBlogCron } from '@/modules/blog/cron';
 import { startWebhookDispatcher } from '@/modules/webhooks/dispatcher';
 import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
+import { startWhatsAppDispatcher } from '@/modules/notifications/whatsapp-dispatcher';
 import { startAbandonedCartCron } from '@/modules/cart/abandoned-cron';
 import { startPaymentReconciliationCron } from '@/modules/payments/reconciliation-cron';
 import { ensureCoreCategories } from '@/infra/ensure-categories';
@@ -272,6 +273,7 @@ async function start() {
   }
   startWebhookDispatcher();
   startNotificationDispatcher();
+  startWhatsAppDispatcher();
   startLoyaltyEarnSubscriber();
   startLoyaltyMaintenanceCron();
   startAbandonedCartCron();

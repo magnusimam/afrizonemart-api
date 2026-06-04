@@ -87,6 +87,25 @@ const envSchema = z.object({
   EMAIL_FROM: z.string().default('Afrizonemart <no-reply@afrizonemart.com>'),
   EMAIL_REPLY_TO: z.string().optional(),
 
+  /// WhatsApp Cloud API — admin order-alert pipeline. When all four
+  /// are set the MetaCloudWhatsAppProvider is selected; otherwise
+  /// the ConsoleWhatsAppProvider logs the rendered message to stdout
+  /// (dev / no-cost mode). See [[whatsapp-admin-alerts]] memory for
+  /// the Meta Business Manager setup steps Magnus owns.
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  /// Name of the approved template message on Meta Business
+  /// Manager. The template MUST take 4 positional parameters in
+  /// this order: orderNumber, total (formatted), customerName,
+  /// adminUrl. Until the template is approved, leave this unset and
+  /// the provider falls back to Console.
+  WHATSAPP_TEMPLATE_NAME: z.string().optional(),
+  WHATSAPP_TEMPLATE_LANG: z.string().default('en'),
+  /// Single recipient phone number in E.164 format (e.g.
+  /// "+2348012345678"). Comma-separated multiple recipients are
+  /// supported but #1 use case is "send to Magnus's WhatsApp".
+  ORDER_NOTIFY_WHATSAPP_TO: z.string().optional(),
+
   // Google OAuth — when set, the storefront's "Continue with Google"
   // button is enabled. The same client id is exposed on the frontend
   // via NEXT_PUBLIC_GOOGLE_CLIENT_ID.
