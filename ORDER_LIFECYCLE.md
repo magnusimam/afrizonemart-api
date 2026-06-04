@@ -26,15 +26,15 @@
 
 ## Subscribers (what fires when)
 
-| Event | Notifications | Loyalty | Webhooks (outbound) | WhatsApp (admin alert) |
-|---|---|---|---|---|
-| `order.placed` | **only** for BANK_TRANSFER / CASH_ON_DELIVERY: `OrderAwaitingPayment` email. **No email for online methods** — they wait for `order.paid`. | — | yes (dispatched to admin-configured webhook subscribers) | — |
-| `order.paid` | `OrderConfirmed` + `PaymentReceived` emails | `awardCoinsForPaidOrder` — coin earn + tier check + welcome bonus | yes | yes — `new_order_alert` template sent to every number in `ORDER_NOTIFY_WHATSAPP_TO` via Meta WhatsApp Cloud API (`whatsapp-dispatcher.ts`). Silently no-ops when env not set. |
-| `payment.failed` | `PaymentFailed` email (with gateway reason if any) | — | yes |
-| `order.shipped` | `OrderShipped` email | — | yes |
-| `order.delivered` | `OrderDelivered` email | — | yes |
-| `order.cancelled` | `OrderCancelled` email | — | yes |
-| `order.refunded` | `RefundIssued` email | `clawbackOnRefund` — REDEEM_REFUND always, REVERSAL on full refund | yes |
+| Event | Notifications | Loyalty | Webhooks (outbound) | WhatsApp (admin alert) | Push (mobile) |
+|---|---|---|---|---|---|
+| `order.placed` | **only** for BANK_TRANSFER / CASH_ON_DELIVERY: `OrderAwaitingPayment` email. **No email for online methods** — they wait for `order.paid`. | — | yes (dispatched to admin-configured webhook subscribers) | — | — |
+| `order.paid` | `OrderConfirmed` + `PaymentReceived` emails | `awardCoinsForPaidOrder` — coin earn + tier check + welcome bonus | yes | yes — `new_order_alert` template sent to every number in `ORDER_NOTIFY_WHATSAPP_TO` via Meta WhatsApp Cloud API (`whatsapp-dispatcher.ts`). Silently no-ops when env not set. | yes — "Payment received" to every registered push token for the customer (`push-dispatcher.ts`). |
+| `payment.failed` | `PaymentFailed` email (with gateway reason if any) | — | yes | — | yes — "Payment failed" |
+| `order.shipped` | `OrderShipped` email | — | yes | — | yes — "On the way" |
+| `order.delivered` | `OrderDelivered` email | — | yes | — | yes — "Delivered" |
+| `order.cancelled` | `OrderCancelled` email | — | yes | — | yes — "Order cancelled" |
+| `order.refunded` | `RefundIssued` email | `clawbackOnRefund` — REDEEM_REFUND always, REVERSAL on full refund | yes | — | — |
 | `order.note_added` | only if `isCustomerVisible: true`: planned future email (not wired) | — | yes |
 
 ## Why this design has no holes
