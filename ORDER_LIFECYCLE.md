@@ -26,10 +26,10 @@
 
 ## Subscribers (what fires when)
 
-| Event | Notifications | Loyalty | Webhooks (outbound) |
-|---|---|---|---|
-| `order.placed` | **only** for BANK_TRANSFER / CASH_ON_DELIVERY: `OrderAwaitingPayment` email. **No email for online methods** — they wait for `order.paid`. | — | yes (dispatched to admin-configured webhook subscribers) |
-| `order.paid` | `OrderConfirmed` + `PaymentReceived` emails | `awardCoinsForPaidOrder` — coin earn + tier check + welcome bonus | yes |
+| Event | Notifications | Loyalty | Webhooks (outbound) | WhatsApp (admin alert) |
+|---|---|---|---|---|
+| `order.placed` | **only** for BANK_TRANSFER / CASH_ON_DELIVERY: `OrderAwaitingPayment` email. **No email for online methods** — they wait for `order.paid`. | — | yes (dispatched to admin-configured webhook subscribers) | — |
+| `order.paid` | `OrderConfirmed` + `PaymentReceived` emails | `awardCoinsForPaidOrder` — coin earn + tier check + welcome bonus | yes | yes — `new_order_alert` template sent to every number in `ORDER_NOTIFY_WHATSAPP_TO` via Meta WhatsApp Cloud API (`whatsapp-dispatcher.ts`). Silently no-ops when env not set. |
 | `payment.failed` | `PaymentFailed` email (with gateway reason if any) | — | yes |
 | `order.shipped` | `OrderShipped` email | — | yes |
 | `order.delivered` | `OrderDelivered` email | — | yes |
