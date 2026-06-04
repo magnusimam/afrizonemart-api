@@ -72,6 +72,18 @@ export function startPushDispatcher(): void {
     });
   });
 
+  eventBus.on('cart.abandoned', async ({ userId, itemCount }) => {
+    /// Already gated upstream by the cron's "send-once-per-cart"
+    /// rule — see cart/abandoned-cron.ts. We trust it; no extra
+    /// dedup here.
+    const noun = itemCount === 1 ? 'item' : 'items';
+    await sendToUser(userId, {
+      title: 'Still thinking about it?',
+      body: `You left ${itemCount} ${noun} in your cart. Tap to pick up where you left off.`,
+      data: { deepLink: 'afrizonemart://cart', type: 'cart.abandoned' },
+    });
+  });
+
   eventBus.on('payment.failed', async ({ orderId }) => {
     const order = await loadOrderForPush(orderId);
     if (!order) return;
