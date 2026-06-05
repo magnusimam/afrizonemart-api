@@ -9,6 +9,7 @@ import {
   authStrictLimiter,
 } from '@/middleware/rate-limit';
 import {
+  deleteMeHandler,
   forgotPasswordHandler,
   googleChallengeHandler,
   googleSignInHandler,
@@ -37,6 +38,11 @@ authRoutes.get('/me', requireAuth, asyncHandler(meHandler));
 // are DB-write only and infrequent; spam-protection isn't worth the
 // false-positive risk for legitimate users.
 authRoutes.patch('/me', requireAuth, asyncHandler(updateMeHandler));
+/// 2026-06-05 — Play Store compliance: in-app account deletion.
+/// Rate-limited under the strict tier because successful calls are
+/// irreversible. requireAuth is the primary gate; the typed
+/// confirmation string in the body is the secondary one.
+authRoutes.delete('/me', requireAuth, authStrictLimiter, asyncHandler(deleteMeHandler));
 authRoutes.post('/forgot-password', authPasswordResetLimiter, asyncHandler(forgotPasswordHandler));
 authRoutes.post('/reset-password', authStrictLimiter, asyncHandler(resetPasswordHandler));
 // Phase Auth.B/C — third-party sign-in

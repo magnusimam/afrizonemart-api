@@ -25,6 +25,7 @@ import {
   startPhoneVerification,
   verifyPhoneAndSignIn,
 } from './phone.service';
+import { deleteOwnAccount } from './delete-account.service';
 
 const REFRESH_COOKIE = 'azm_refresh';
 
@@ -116,6 +117,32 @@ export async function updateMeHandler(
   const body = updateMeBodySchema.parse(req.body);
   const user = await updateMe(req.user.id, body);
   res.json(user);
+}
+
+/// DELETE /api/auth/me — in-app account deletion.
+///
+/// Required by Google Play (mid-2024 policy: every app with auth
+/// must offer in-app delete). Wipes refresh cookie + access token
+/// effectively so the next request from the client falls through
+/// to the signed-out path.
+const deleteMeBodySchema = z.object({
+  confirmation: z.string().min(1).max(120),
+  reason: z.string().max(500).optional().nullable(),
+});
+
+export async function deleteMeHandler(
+  req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  if (!req.user) throw HttpError.unauthorized();
+  const body = deleteMeBodySchema.parse(req.body);
+  await deleteOwnAccount({
+    userId: req.user.id,
+    confirmation: body.confirmation,
+    reason: body.reason ?? null,
+  });
+  clearRefreshCookie(res);
+  res.status(204).end();
 }
 
 export async function logoutHandler(

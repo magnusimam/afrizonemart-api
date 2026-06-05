@@ -91,6 +91,14 @@ export interface EventMap {
     userId: string;
     email: string;
   };
+  /// 2026-06-05 — Play Store compliance: account deletion. Emitted
+  /// AFTER the anonymisation transaction commits. Subscribers run
+  /// cleanup that doesn't need to be inside the tx — clearing
+  /// pending marketing-email schedules, revoking active sessions,
+  /// updating ops dashboards.
+  'user.deleted': {
+    userId: string;
+  };
   'order.cancelled': {
     orderId: string;
     userId: string;

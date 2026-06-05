@@ -88,6 +88,15 @@ model User {
   /// is wired, this is the column it gates on.
   marketingOptIn      Boolean   @default(false)
   smsOptIn            Boolean   @default(false)
+  /// 2026-06-05 — Play Store compliance: in-app account deletion.
+  /// Set the moment a user invokes DELETE /api/auth/me. Their PII
+  /// (email, name, phone, avatar) is anonymised in the same write
+  /// so this column is mostly a marker for "tombstoned user — do
+  /// not surface in admin lists, do not send marketing." Orders +
+  /// reviews stay linked by userId so accounting + review
+  /// integrity is preserved; only the user's identity fields are
+  /// scrubbed. A future 30-day cron hard-deletes the row + cascades.
+  deletedAt           DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
