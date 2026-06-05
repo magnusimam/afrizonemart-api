@@ -106,6 +106,25 @@ const envSchema = z.object({
   /// supported but #1 use case is "send to Magnus's WhatsApp".
   ORDER_NOTIFY_WHATSAPP_TO: z.string().optional(),
 
+  /// Mobile app version gate — `GET /api/app/version-gate` reads
+  /// these on every call so we can flip them via Railway env
+  /// without a code deploy when a critical bug ships. Format:
+  /// semver string. Defaults keep all clients on the wire — only
+  /// raise when ops wants to enforce.
+  /// IOS_MIN_VERSION + ANDROID_MIN_VERSION: BELOW this is considered
+  ///   stale (soft warning UI). At/above keeps working normally.
+  /// IOS_FORCE_VERSION + ANDROID_FORCE_VERSION: BELOW this BLOCKS
+  ///   the app — full-screen "you must update" gate. Use only for
+  ///   genuine emergencies (security holes, broken protocol).
+  IOS_MIN_VERSION: z.string().default('0.0.0'),
+  ANDROID_MIN_VERSION: z.string().default('0.0.0'),
+  IOS_FORCE_VERSION: z.string().default('0.0.0'),
+  ANDROID_FORCE_VERSION: z.string().default('0.0.0'),
+  /// Optional message shown on the upgrade screen (overrides the
+  /// generic "please update" copy). Keep short — fits in a
+  /// notification-style modal.
+  APP_UPGRADE_MESSAGE: z.string().optional(),
+
   // Google OAuth — when set, the storefront's "Continue with Google"
   // button is enabled. The same client id is exposed on the frontend
   // via NEXT_PUBLIC_GOOGLE_CLIENT_ID.
