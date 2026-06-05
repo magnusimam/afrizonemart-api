@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
 import type { CreateReviewBody, ListReviewsQuery } from './schema';
@@ -132,20 +132,38 @@ export async function createReviewService(userId: string, body: CreateReviewBody
   const authorName =
     user.name?.trim() || user.email.split('@')[0] || 'Anonymous';
 
-  const created = await prisma.$transaction(async (tx) => {
-    const row = await tx.review.create({
-      data: {
-        productId: product.id,
-        authorName,
-        authorCountry: null,
-        rating: body.rating,
-        title: body.title?.trim() || null,
-        body: body.body.trim(),
-        verified: Boolean(purchased),
-      },
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.review.create({
+        data: {
+          productId: product.id,
+          userId,
+          authorName,
+          authorCountry: null,
+          rating: body.rating,
+          title: body.title?.trim() || null,
+          body: body.body.trim(),
+          verified: Boolean(purchased),
+        },
+      });
+      await recomputeProductRating(tx, product.id);
+      return row;
     });
-    await recomputeProductRating(tx, product.id);
-    return row;
-  });
-  return publicReview(created);
+    return publicReview(created);
+  } catch (err) {
+    /// Partial unique index on (userId, productId) — catch the
+    /// constraint violation and surface a friendly message
+    /// instead of the raw Prisma error. The mobile bulk-rate flow
+    /// handles a 409 per-row so other reviews in the same batch
+    /// still land.
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002'
+    ) {
+      throw HttpError.conflict(
+        "You've already reviewed this product. Edit your existing review instead.",
+      );
+    }
+    throw err;
+  }
 }

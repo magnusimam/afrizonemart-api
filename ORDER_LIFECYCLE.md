@@ -21,6 +21,7 @@
 | `order.shipped` | `orders/admin.service.ts` | Admin status change `PAID → SHIPPED`. |
 | `order.out_for_delivery` | `orders/admin.service.ts` | Admin status change `SHIPPED → OUT_FOR_DELIVERY`. Also writes a delivery JWT + 6-digit OTP onto Order so the customer's app can render the Show & Scan QR. |
 | `order.delivered` | `courier/service.ts → markDelivered()` | Single canonical write path — four upstream triggers funnel through here: (a) `confirmDeliveryFromCourier()` when a rider scans the QR or types the OTP, (b) `confirmDeliveryAsCustomer()` when the customer taps "I received it", (c) admin status flip in `/admin/orders`, (d) `autoMarkDelivered()` after 14d backstop cron. Event carries `source: 'rider' \| 'customer' \| 'admin' \| 'auto'` so subscribers can suppress noise for `auto`. |
+| `order.review_nudge_due` | `reviews/review-nudge-cron.ts` | Hourly sweep. Finds DELIVERED orders confirmed 24-48h ago (not `auto`), idempotent via `OrderEvent type=NOTE payload.kind=review_nudge_sent`. |
 | `order.cancelled` | `orders/admin.service.ts` | Admin status change `* → CANCELLED`. |
 | `order.refunded` | `orders/admin.service.ts → adminRecordRefund()` | Admin records a refund (partial or full). |
 | `order.note_added` | `orders/admin.service.ts` | Admin adds an internal/customer note. |
@@ -35,6 +36,7 @@
 | `order.shipped` | `OrderShipped` email | — | yes | — | yes — "On the way" |
 | `order.out_for_delivery` | — (no email today) | — | yes | — | yes — "Out for delivery — open the app when the rider arrives" |
 | `order.delivered` | `OrderDelivered` email — **skipped when `source: 'auto'`** so 14-day-backstop customers don't get a confused "your order arrived" email | — | yes | — | yes — "Delivered" — **skipped when `source: 'auto'`** |
+| `order.review_nudge_due` | — | — | — | — | yes — "How was your order? Tap to rate the items in order #...". Deep links to OrderDetail; the customer's "Rate this order" CTA there opens the bulk-review flow. |
 | `order.cancelled` | `OrderCancelled` email | — | yes | — | yes — "Order cancelled" |
 | `order.refunded` | `RefundIssued` email | `clawbackOnRefund` — REDEEM_REFUND always, REVERSAL on full refund | yes | — | — |
 | `order.note_added` | only if `isCustomerVisible: true`: planned future email (not wired) | — | yes |

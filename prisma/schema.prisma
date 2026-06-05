@@ -146,6 +146,10 @@ model User {
   /// every row to fan out a single notification to all the
   /// customer's devices.
   pushTokens              PushToken[]
+  /// 2026-06-05 — product reviews authored by this user. SetNull
+  /// on user delete so review text survives (other shoppers
+  /// benefit) but the row is decoupled for anonymisation.
+  reviews                 Review[]                 @relation("UserReviews")
 
   @@index([email])
   @@index([phone])
@@ -299,6 +303,13 @@ model Review {
   id            String   @id @default(cuid())
   productId     String
   product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// 2026-06-05 — added so we can (a) dedupe reviews per (user,
+  /// product) and (b) anonymise a deleted user's reviews
+  /// retroactively. Nullable for historical rows written before
+  /// this column existed; the partial-unique index below
+  /// only enforces the constraint on non-null values.
+  userId        String?
+  user          User?    @relation("UserReviews", fields: [userId], references: [id], onDelete: SetNull)
   authorName    String
   authorCountry String? // 2-letter ISO
   rating        Int
@@ -309,6 +320,7 @@ model Review {
   updatedAt     DateTime @updatedAt
 
   @@index([productId])
+  @@index([userId])
 }
 
 /// Append-only product view log. Powers the trending sort + future
