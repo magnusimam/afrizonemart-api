@@ -125,6 +125,12 @@ const envSchema = z.object({
   /// notification-style modal.
   APP_UPGRADE_MESSAGE: z.string().optional(),
 
+  /// PostHog server-side analytics. Same project as the client
+  /// SDKs (mobile + web) so server-truth events show up on the
+  /// same dashboards. When unset, the analytics module no-ops.
+  POSTHOG_API_KEY: z.string().optional(),
+  POSTHOG_HOST: z.string().default('https://eu.i.posthog.com'),
+
   // Google OAuth — when set, the storefront's "Continue with Google"
   // button is enabled. The same client id is exposed on the frontend
   // via NEXT_PUBLIC_GOOGLE_CLIENT_ID.
