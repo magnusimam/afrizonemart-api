@@ -103,6 +103,19 @@ export function startPushDispatcher(): void {
     });
   });
 
+  eventBus.on('order.review_nudge_due', async ({ orderId, userId }) => {
+    const order = await loadOrderForPush(orderId);
+    if (!order) return;
+    await sendToUser(userId, {
+      title: 'How was your order?',
+      body: `Tap to rate the items in order #${order.orderNumber}.`,
+      data: {
+        deepLink: `afrizonemart://order/${order.id}`,
+        type: 'order.review_nudge_due',
+      },
+    });
+  });
+
   eventBus.on('payment.failed', async ({ orderId }) => {
     const order = await loadOrderForPush(orderId);
     if (!order) return;

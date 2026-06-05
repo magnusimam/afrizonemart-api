@@ -99,6 +99,14 @@ export interface EventMap {
   'user.deleted': {
     userId: string;
   };
+  /// 2026-06-05 — fires ~24h after `order.delivered` for orders
+  /// confirmed by the customer or rider (not auto-mark). Push
+  /// dispatcher sends a "rate your items" nudge. Cron-driven (see
+  /// `modules/reviews/review-nudge-cron.ts`).
+  'order.review_nudge_due': {
+    orderId: string;
+    userId: string;
+  };
   'order.cancelled': {
     orderId: string;
     userId: string;

@@ -128,11 +128,19 @@ export async function deleteOwnAccount(input: DeleteAccountInput): Promise<void>
       data: { coinBalance: 0 },
     });
 
-    /// NB: Reviews are not anonymised in this pass because the
-    /// schema doesn't carry a userId column on Review — `authorName`
-    /// is a denormalised snapshot from User.name at write time.
-    /// Follow-up backlog item: add `Review.userId` so historical
-    /// reviews can be retroactively anonymised on delete.
+    // ── 5. Anonymise reviews (keep the text, drop identity) ───────
+    /// 2026-06-05 — Review.userId now exists (migration
+    /// 20260605130000_review_user_id). Rewrite authorName to
+    /// "Anonymous reviewer" + null out userId. The FK SET NULL
+    /// would clear userId on a hard-delete but we want both — name
+    /// + id — gone in the same write.
+    await tx.review.updateMany({
+      where: { userId: user.id },
+      data: {
+        authorName: 'Anonymous reviewer',
+        userId: null,
+      },
+    });
   });
 
   logger.info('auth.account_deleted', {
