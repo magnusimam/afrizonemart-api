@@ -150,6 +150,14 @@ model User {
   /// on user delete so review text survives (other shoppers
   /// benefit) but the row is decoupled for anonymisation.
   reviews                 Review[]                 @relation("UserReviews")
+  /// 2026-06-08 — annual Afrizonemart Wrap. One row per
+  /// (user, year). Cascade on user delete so deleted accounts
+  /// don't leave orphan wraps. See WRAP_TRACKER.md.
+  wraps                   WrappedSnapshot[]
+  /// 2026-06-08 — opt-out flag for the annual Wrap. Default
+  /// false (= opted in). Customers can flip via account
+  /// settings. Aggregation cron skips opted-out users.
+  wrapOptOut              Boolean                  @default(false)
 
   @@index([email])
   @@index([phone])
@@ -358,6 +366,40 @@ model ProductView {
   @@index([productId, viewedAt])
   @@index([userId, viewedAt])
   @@index([sessionId, viewedAt])
+}
+
+/// 2026-06-08 — Afrizonemart Wrap. Annual personalised
+/// retrospective customers receive on Dec 1. See WRAP_TRACKER.md
+/// for the full design. One row per (user, year). Daily
+/// aggregation cron upserts; annual publish cron sets
+/// publishedAt = now on Dec 1 morning GMT.
+///
+/// The `stats` JSON is versioned (`version: 1` field inside the
+/// blob) so card-design changes don't require re-aggregation.
+/// Renderer parses + falls back if a future deck adds new
+/// fields the snapshot doesn't have.
+model WrappedSnapshot {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  year            Int
+  /// JSON blob matching `WrappedStatsV1` in
+  /// `modules/wrap/types.ts`. Use Postgres JSON queries for
+  /// admin filters ("show me everyone whose top country was
+  /// Ghana").
+  stats           Json
+  /// Last incremental recompute. Daily cron updates.
+  computedAt      DateTime @default(now())
+  /// Null until the annual publish cron flips it on Dec 1.
+  /// Customer endpoint returns 404 (with WRAP_NOT_READY code)
+  /// when null. Anticipation matters.
+  publishedAt     DateTime?
+  /// Admin can hide a wrap (PII concern, support request,
+  /// data issue). Customer endpoint returns 404 when false.
+  visible         Boolean  @default(true)
+
+  @@unique([userId, year])
+  @@index([year, publishedAt])
 }
 
 // -----------------------------------------------------------------

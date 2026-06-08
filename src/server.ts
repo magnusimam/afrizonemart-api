@@ -52,6 +52,10 @@ import { startWhatsAppDispatcher } from '@/modules/notifications/whatsapp-dispat
 import { startPushDispatcher } from '@/modules/notifications/push-dispatcher';
 import { startCourierAutoMarkCron } from '@/modules/courier/auto-mark-cron';
 import { startReviewNudgeCron } from '@/modules/reviews/review-nudge-cron';
+import {
+  startWrapAggregationCron,
+  startWrapPublishCron,
+} from '@/modules/wrap/cron';
 import { initServerAnalytics } from '@/modules/analytics/analytics';
 import { startAnalyticsDispatcher } from '@/modules/analytics/dispatcher';
 import { startAbandonedCartCron } from '@/modules/cart/abandoned-cron';
@@ -288,6 +292,8 @@ async function start() {
   startPushDispatcher();
   startCourierAutoMarkCron();
   startReviewNudgeCron();
+  startWrapAggregationCron();
+  startWrapPublishCron();
   initServerAnalytics();
   startAnalyticsDispatcher();
   startLoyaltyEarnSubscriber();
