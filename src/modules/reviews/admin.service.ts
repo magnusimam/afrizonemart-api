@@ -11,6 +11,7 @@ export async function adminListReviews(query: AdminReviewListQuery) {
   if (query.productId) where.productId = query.productId;
   if (query.rating) where.rating = query.rating;
   if (query.verified !== undefined) where.verified = query.verified;
+  if (query.hidden !== undefined) where.hidden = query.hidden;
 
   const [items, total] = await Promise.all([
     prisma.review.findMany({
@@ -35,8 +36,11 @@ export async function adminListReviews(query: AdminReviewListQuery) {
 }
 
 async function recomputeProductRating(productId: string): Promise<void> {
+  /// Hidden reviews are excluded from the aggregate so a moderator
+  /// hiding a 1-star spam review immediately corrects the
+  /// displayed average. Matches the public service's recompute.
   const agg = await prisma.review.aggregate({
-    where: { productId },
+    where: { productId, hidden: false },
     _avg: { rating: true },
     _count: { _all: true },
   });
@@ -60,11 +64,19 @@ export async function adminUpdateReview(id: string, body: UpdateReviewBody) {
       ...(body.title !== undefined && { title: body.title ?? null }),
       ...(body.body !== undefined && { body: body.body }),
       ...(body.rating !== undefined && { rating: body.rating }),
+      ...(body.hidden !== undefined && { hidden: body.hidden }),
+      ...(body.hiddenReason !== undefined && {
+        hiddenReason: body.hiddenReason ?? null,
+      }),
     },
     include: { product: { select: { id: true, slug: true, name: true } } },
   });
 
-  if (body.rating !== undefined) {
+  /// Recompute when rating OR hidden toggled — hiding/unhiding
+  /// changes the aggregate just like a rating change does. The
+  /// admin recompute helper now excludes hidden rows so this
+  /// produces the correct average + reviewCount in one call.
+  if (body.rating !== undefined || body.hidden !== undefined) {
     await recomputeProductRating(existing.productId);
   }
   return updated;

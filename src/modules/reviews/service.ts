@@ -33,8 +33,12 @@ async function recomputeProductRating(
   tx: AppTx,
   productId: string,
 ): Promise<void> {
+  /// Hidden reviews are excluded from the aggregate so a moderator
+  /// flipping a 1-star spam review to hidden immediately corrects
+  /// the displayed average — same write path the public list
+  /// reads from.
   const agg = await tx.review.aggregate({
-    where: { productId },
+    where: { productId, hidden: false },
     _avg: { rating: true },
     _count: { _all: true },
   });
@@ -81,14 +85,18 @@ export async function listReviewsForProductService(q: ListReviewsQuery) {
   if (!product) throw HttpError.notFound('Product not found');
 
   const skip = (q.page - 1) * q.limit;
+  /// Filter out hidden reviews here AND in the count so the
+  /// "Show more (N)" pagination button on the PDP never promises a
+  /// page that turns out to be empty after the hidden filter.
+  const publicWhere = { productId: product.id, hidden: false };
   const [items, total] = await Promise.all([
     prisma.review.findMany({
-      where: { productId: product.id },
+      where: publicWhere,
       orderBy: [{ verified: 'desc' }, { createdAt: 'desc' }],
       skip,
       take: q.limit,
     }),
-    prisma.review.count({ where: { productId: product.id } }),
+    prisma.review.count({ where: publicWhere }),
   ]);
   return {
     items: items.map(publicReview),
