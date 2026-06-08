@@ -316,6 +316,16 @@ model Review {
   title         String?
   body          String   @db.Text
   verified      Boolean  @default(false)
+  /// 2026-06-08 — soft-delete flag for moderation. Hidden reviews
+  /// are excluded from the public listProductReviews endpoint AND
+  /// from the product-rating aggregate (so a hidden 1-star
+  /// review doesn't drag the displayed average down). Admin can
+  /// flip + unflip; hard-delete remains available for truly
+  /// abusive content where we want the row gone for good.
+  hidden        Boolean  @default(false)
+  /// Why ops hid this review — short audit string. Surfaced on
+  /// the admin row so the next person doesn't re-unhide blind.
+  hiddenReason  String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
