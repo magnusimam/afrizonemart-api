@@ -5,6 +5,7 @@ import { requireCapability } from '@/middleware/require-capability';
 import { adminBrandRoutes, adminProductRoutes } from '@/modules/products/admin.routes';
 import { adminCategoryRoutes } from '@/modules/categories/admin.routes';
 import { adminReviewRoutes } from '@/modules/reviews/admin.routes';
+import { adminWrapRoutes } from '@/modules/wrap/admin.routes';
 import { adminViewRoutes } from '@/modules/views/admin.routes';
 import { adminOrderRoutes } from '@/modules/orders/admin.routes';
 import { adminCustomerRoutes, adminStaffRoutes } from '@/modules/customers/admin.routes';
@@ -85,6 +86,10 @@ adminRouter.use('/products', requireCapability('products.write'), adminProductRo
 adminRouter.use('/brands', requireCapability('products.write'), adminBrandRoutes);
 adminRouter.use('/categories', requireCapability('categories.write'), adminCategoryRoutes);
 adminRouter.use('/reviews', requireCapability('reviews.moderate'), adminReviewRoutes);
+/// Wrap admin (preview / recompute / publish / hide). Gated on
+/// content.write — same level as our other ops-facing content
+/// admin (categories heroes, landing pages, etc.).
+adminRouter.use('/wrap', requireCapability('content.write'), adminWrapRoutes);
 adminRouter.use('/views', requireCapability('analytics.read'), adminViewRoutes);
 adminRouter.use('/orders', requireCapability('orders.read'), adminOrderRoutes);
 adminRouter.use('/customers', requireCapability('customers.read'), adminCustomerRoutes);
