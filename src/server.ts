@@ -31,6 +31,7 @@ import { cmsRoutes } from '@/modules/cms/routes';
 import { fxRoutes } from '@/modules/fx/routes';
 import { categoryRoutes } from '@/modules/categories/routes';
 import { shelfRoutes } from '@/modules/shelves/routes';
+import { wrapRoutes } from '@/modules/wrap/routes';
 import { wishlistRoutes } from '@/modules/wishlist/routes';
 import { reviewRoutes } from '@/modules/reviews/routes';
 import { viewRoutes } from '@/modules/views/routes';
@@ -245,6 +246,7 @@ app.use('/api/intern', internRoutes);
 app.use('/api/fx', fxRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/shelves', shelfRoutes);
+app.use('/api/wrap', wrapRoutes);
 app.use('/api/admin', adminRouter);
 
 // Terminal handlers

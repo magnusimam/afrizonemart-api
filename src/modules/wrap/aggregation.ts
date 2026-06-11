@@ -22,9 +22,9 @@ import type { WrappedPersonality, WrappedStatsV1 } from './types';
  * orders / items / categories / countries, not amounts.
  */
 
-const MIN_ORDERS = 3;
+export const MIN_ORDERS = 3;
 
-const QUALIFYING_STATUSES = [
+export const QUALIFYING_STATUSES = [
   'PAID',
   'FULFILLING',
   'SHIPPED',
@@ -32,6 +32,26 @@ const QUALIFYING_STATUSES = [
   'DELIVERED',
   'REFUNDED',
 ] as const;
+
+/**
+ * Count a user's qualifying orders in a year — the eligibility
+ * number behind the "you're at N orders, unlock at 3" teaser. Cheap
+ * COUNT, no item joins (unlike computeUserWrap).
+ */
+export async function countQualifyingOrders(
+  userId: string,
+  year: number,
+): Promise<number> {
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const yearEnd = new Date(Date.UTC(year + 1, 0, 1));
+  return prisma.order.count({
+    where: {
+      userId,
+      status: { in: [...QUALIFYING_STATUSES] },
+      createdAt: { gte: yearStart, lt: yearEnd },
+    },
+  });
+}
 
 /**
  * Compact country-name map for the African nations we trade with.
