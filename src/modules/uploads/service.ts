@@ -9,6 +9,7 @@ import { LocalDiskStorage } from './storage/local-disk';
 import { R2Storage } from './storage/r2';
 import type { UploadStorage } from './storage/types';
 import { sniffImageMime } from './sniff';
+import { sniffAudioMime } from './sniff-audio';
 
 const ALLOWED_MIME = new Set([
   'image/jpeg',
@@ -26,6 +27,14 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/gif': 'gif',
 };
 
+const AUDIO_MIME_TO_EXT: Record<string, string> = {
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/ogg': 'ogg',
+  'audio/mp4': 'm4a',
+  'audio/aac': 'aac',
+};
+
 const ALLOWED_FOLDERS = new Set([
   'products',
   'categories',
@@ -33,6 +42,7 @@ const ALLOWED_FOLDERS = new Set([
   'reviews',
   'sellers',
   'avatars',
+  'audio',
   'misc',
 ]);
 
@@ -112,6 +122,40 @@ export async function uploadImage(input: UploadInput): Promise<UploadResult> {
   const folder = input.folder && ALLOWED_FOLDERS.has(input.folder) ? input.folder : 'misc';
   const ext = MIME_TO_EXT[sniffed];
   const key = `${folder}/${createId()}.${ext}`;
+
+  const { url } = await storage().put(key, input.buffer, sniffed);
+
+  return {
+    url,
+    key,
+    contentType: sniffed,
+    size: input.size,
+    ...(input.originalName ? { originalName: path.basename(input.originalName) } : {}),
+  };
+}
+
+/**
+ * Audio sibling of `uploadImage`. Same security posture: sniff the
+ * magic bytes, never trust the client header, store under a fixed
+ * `audio/` prefix. Used for the Afrizonemart Wrap background-music
+ * track the admin uploads on /admin/wrap.
+ */
+export async function uploadAudio(input: UploadInput): Promise<UploadResult> {
+  if (input.size > env.UPLOADS_MAX_BYTES) {
+    throw HttpError.badRequest(
+      `File too large (${input.size} bytes). Max ${env.UPLOADS_MAX_BYTES} bytes.`,
+    );
+  }
+
+  const sniffed = sniffAudioMime(input.buffer);
+  if (!sniffed) {
+    throw HttpError.badRequest(
+      'File contents are not a recognised audio file (mp3, wav, ogg, m4a, aac).',
+    );
+  }
+
+  const ext = AUDIO_MIME_TO_EXT[sniffed];
+  const key = `audio/${createId()}.${ext}`;
 
   const { url } = await storage().put(key, input.buffer, sniffed);
 

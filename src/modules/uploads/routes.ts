@@ -5,7 +5,7 @@ import { requireAuth } from '@/middleware/auth';
 import { requireCapability } from '@/middleware/require-capability';
 import { env } from '@/config/env';
 import { HttpError } from '@/middleware/error-handler';
-import { uploadHandler } from './controller';
+import { uploadAudioHandler, uploadHandler } from './controller';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -14,6 +14,17 @@ const upload = multer({
     // Accept anything image/*; the service does strict mime-type validation.
     if (file.mimetype.startsWith('image/')) cb(null, true);
     else cb(new Error('Only image uploads are allowed'));
+  },
+});
+
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: env.UPLOADS_MAX_BYTES },
+  fileFilter: (_req, file, cb: FileFilterCallback) => {
+    // Accept anything audio/*; the service sniffs magic bytes for the
+    // strict allowlist (mp3 / wav / ogg / m4a / aac).
+    if (file.mimetype.startsWith('audio/')) cb(null, true);
+    else cb(new Error('Only audio uploads are allowed'));
   },
 });
 
@@ -65,3 +76,12 @@ uploadRoutes.post(
 uploadRoutes.use(requireAuth, requireCapability('uploads.write'));
 
 uploadRoutes.post('/', translateMulterError(upload.single('file')), asyncHandler(uploadHandler));
+
+// Audio upload — admin/staff with uploads.write (inherited above).
+// Stored under the fixed `audio/` prefix. Powers the Afrizonemart
+// Wrap background-music track set on /admin/wrap.
+uploadRoutes.post(
+  '/audio',
+  translateMulterError(audioUpload.single('file')),
+  asyncHandler(uploadAudioHandler),
+);
