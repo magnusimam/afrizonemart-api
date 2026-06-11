@@ -1,5 +1,9 @@
 import { logger } from '@/infra/logger';
-import { publishWrapsForYear, runDailyWrapSweep } from './service';
+import {
+  publishWrapsForYear,
+  runDailyWrapSweep,
+  runFullWrapBackfill,
+} from './service';
 
 /**
  * Two crons for the annual Afrizonemart Wrap:
@@ -30,8 +34,19 @@ async function runSweep(): Promise<void> {
   if (sweepRunning) return;
   sweepRunning = true;
   try {
-    const year = new Date().getUTCFullYear();
-    await runDailyWrapSweep(year);
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    // November is the pre-drop safety window: run a FULL backfill
+    // nightly so every eligible user has a snapshot by Dec 1, even
+    // ones the incremental sweep's 36h window missed during an
+    // outage. The rest of the year, the cheap incremental sweep is
+    // enough (orders are seen within their 36h window by the daily
+    // run).
+    if (now.getUTCMonth() === 10) {
+      await runFullWrapBackfill(year);
+    } else {
+      await runDailyWrapSweep(year);
+    }
   } catch (err) {
     logger.error('wrap.sweep.unexpected', {
       error: err instanceof Error ? err.message : String(err),

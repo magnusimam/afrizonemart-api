@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '@/middleware/async-handler';
 import {
+  adminBackfillWrapsHandler,
   adminMockPreviewWrapHandler,
   adminPreviewWrapHandler,
   adminPublishWrapsHandler,
@@ -21,4 +22,5 @@ adminWrapRoutes.get('/preview', asyncHandler(adminPreviewWrapHandler));
 adminWrapRoutes.post('/mock-preview', asyncHandler(adminMockPreviewWrapHandler));
 adminWrapRoutes.post('/recompute', asyncHandler(adminRecomputeWrapHandler));
 adminWrapRoutes.post('/publish', asyncHandler(adminPublishWrapsHandler));
+adminWrapRoutes.post('/backfill', asyncHandler(adminBackfillWrapsHandler));
 adminWrapRoutes.patch('/:id', asyncHandler(adminToggleWrapVisibilityHandler));
