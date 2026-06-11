@@ -7,6 +7,83 @@ import {
   upsertUserWrap,
 } from './service';
 import { computeUserWrap } from './aggregation';
+import { computeMockWrap } from './mock';
+import type { WrappedPersonality } from './types';
+
+const PERSONALITIES: readonly WrappedPersonality[] = [
+  'CONNECTOR',
+  'PATRIOT',
+  'EXPLORER',
+  'CURATOR',
+];
+
+/**
+ * POST /api/admin/wrap/mock-preview
+ *
+ * Body: { personality, homeCountry?, totalOrders? }
+ *
+ * Returns a fully-shaped WrappedStatsV1 synthesised from the persona
+ * knobs — no DB read/write. Powers the /admin/wrap/demo console so
+ * stakeholders can preview every card before the Dec 1 drop.
+ */
+export async function adminMockPreviewWrapHandler(
+  req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const personality = body.personality;
+  if (
+    typeof personality !== 'string' ||
+    !PERSONALITIES.includes(personality as WrappedPersonality)
+  ) {
+    throw HttpError.badRequest(
+      `personality must be one of: ${PERSONALITIES.join(', ')}`,
+    );
+  }
+  const homeCountry =
+    typeof body.homeCountry === 'string' ? body.homeCountry : null;
+  const totalOrders =
+    typeof body.totalOrders === 'number' ? body.totalOrders : undefined;
+
+  const stats = computeMockWrap({
+    personality: personality as WrappedPersonality,
+    homeCountry,
+    totalOrders,
+  });
+  res.json({ stats });
+}
+
+/**
+ * GET /api/admin/wrap/stats
+ *
+ * Per-year snapshot counts (total / visible / published) for the
+ * admin index. Pure aggregate read over WrappedSnapshot.
+ */
+export async function adminWrapStatsHandler(
+  _req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  const rows = await prisma.$queryRawUnsafe<
+    Array<{
+      year: number;
+      snapshots: number;
+      visible: number;
+      published: number;
+    }>
+  >(
+    `
+    SELECT
+      year,
+      COUNT(*)::int AS snapshots,
+      COUNT(*) FILTER (WHERE visible)::int AS visible,
+      COUNT(*) FILTER (WHERE "publishedAt" IS NOT NULL)::int AS published
+    FROM "WrappedSnapshot"
+    GROUP BY year
+    ORDER BY year DESC
+    `,
+  );
+  res.json({ years: rows });
+}
 
 /**
  * GET /api/admin/wrap/preview?userId=<id>&year=<year>
