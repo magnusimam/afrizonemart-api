@@ -4,6 +4,7 @@ import { HttpError } from '@/middleware/error-handler';
 import type { AuthedRequest } from '@/middleware/auth';
 import {
   publishWrapsForYear,
+  runFullWrapBackfill,
   upsertUserWrap,
 } from './service';
 import { computeUserWrap } from './aggregation';
@@ -155,6 +156,27 @@ export async function adminPublishWrapsHandler(
   if (!Number.isFinite(year)) throw HttpError.badRequest('invalid year');
   const count = await publishWrapsForYear(year);
   res.json({ published: count });
+}
+
+/**
+ * POST /api/admin/wrap/backfill?year=<year>
+ *
+ * Run the full backfill on demand — upserts a snapshot for every
+ * user with >= MIN_ORDERS orders this year, not just the recently
+ * active. The insurance lever to run before the Dec 1 drop (or after
+ * an outage) so no eligible customer is missing a wrap.
+ */
+export async function adminBackfillWrapsHandler(
+  req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  const year =
+    typeof req.query.year === 'string'
+      ? Number.parseInt(req.query.year, 10)
+      : new Date().getUTCFullYear();
+  if (!Number.isFinite(year)) throw HttpError.badRequest('invalid year');
+  const result = await runFullWrapBackfill(year);
+  res.json(result);
 }
 
 /**

@@ -1,6 +1,10 @@
 import { prisma } from '@/infra/prisma';
 import { logger } from '@/infra/logger';
-import { computeUserWrap } from './aggregation';
+import {
+  computeUserWrap,
+  MIN_ORDERS,
+  QUALIFYING_STATUSES,
+} from './aggregation';
 
 /**
  * Upsert one user's snapshot for the current year. Idempotent.
@@ -98,6 +102,63 @@ export async function runDailyWrapSweep(year: number): Promise<void> {
     skipped,
     failed,
   });
+}
+
+/**
+ * Every user with >= MIN_ORDERS qualifying orders this year — i.e.
+ * everyone who SHOULD have a snapshot, regardless of recent activity.
+ * The incremental sweep only sees the last 36h + existing snapshots;
+ * this is the full eligibility set, used by the backfill.
+ */
+export async function listAllEligibleUserIds(year: number): Promise<string[]> {
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const yearEnd = new Date(Date.UTC(year + 1, 0, 1));
+  const grouped = await prisma.order.groupBy({
+    by: ['userId'],
+    where: {
+      status: { in: [...QUALIFYING_STATUSES] },
+      createdAt: { gte: yearStart, lt: yearEnd },
+    },
+    _count: { _all: true },
+  });
+  return grouped
+    .filter((g) => g._count._all >= MIN_ORDERS)
+    .map((g) => g.userId);
+}
+
+/**
+ * Full backfill — upserts a snapshot for EVERY eligible user, not
+ * just the recently-active ones. The incremental daily sweep can miss
+ * a user whose order landed during an API outage longer than its 36h
+ * window (e.g. the 11-day Railway gap in 2026-06). This closes that:
+ * run it nightly in November and/or right before the Dec 1 publish so
+ * no eligible customer is left without a wrap. Idempotent.
+ */
+export async function runFullWrapBackfill(
+  year: number,
+): Promise<{ eligible: number; upserted: number; skipped: number; failed: number }> {
+  const userIds = await listAllEligibleUserIds(year);
+  let upserted = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const userId of userIds) {
+    try {
+      const r = await upsertUserWrap(userId, year);
+      if (r.skipped) skipped++;
+      else upserted++;
+    } catch (err) {
+      failed++;
+      logger.error('wrap.backfill.row_failed', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const result = { eligible: userIds.length, upserted, skipped, failed };
+  logger.info('wrap.backfill.complete', { year, ...result });
+  return result;
 }
 
 /**
