@@ -158,6 +158,16 @@ export const SITE_CONTENT_SLOTS: readonly SlotDef[] = [
     kind: 'text',
     hint: 'Single line on the amber strip near the bottom of the page.',
   },
+
+  // ----- Afrizonemart Wrap / Audio -----
+  {
+    key: 'content.wrap.backgroundMusic',
+    label: 'Background music URL',
+    page: 'Afrizonemart Wrap',
+    section: 'Audio',
+    kind: 'text',
+    hint: 'Audio file (mp3/m4a/ogg/wav) played behind the wrap slides. Upload via the Wrap admin page; clear to mute.',
+  },
 ];
 
 export const SLOT_KEYS = SITE_CONTENT_SLOTS.map((s) => s.key);
