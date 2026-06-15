@@ -68,17 +68,70 @@ export async function getStaff(id: string) {
   };
 }
 
+const STAFF_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  jobTitle: true,
+  permissions: true,
+  createdAt: true,
+} as const;
+
 export async function createStaff(body: CreateStaffBody) {
   const existing = await prisma.user.findUnique({
     where: { email: body.email },
-    select: { id: true, email: true, role: true },
+    select: { id: true, email: true, role: true, name: true },
   });
+
   if (existing) {
-    throw HttpError.conflict(
-      `${body.email} already exists with role ${existing.role}. Promote them via the customer detail page instead.`,
-    );
+    // Already a staff-type account — can't "create" a second one.
+    // Send them to the Staff list to edit role/permissions.
+    if (existing.role !== 'CUSTOMER') {
+      throw HttpError.conflict(
+        `${body.email} already has role ${existing.role}. Edit them in the Staff list instead.`,
+      );
+    }
+    // Existing CUSTOMER — promote in place, but only on explicit
+    // confirm so a mistyped email matching a real shopper can't
+    // silently elevate them. The UI catches CUSTOMER_EXISTS and asks.
+    if (!body.promoteExisting) {
+      throw new HttpError(
+        409,
+        'CUSTOMER_EXISTS',
+        `${body.email} is already a customer${existing.name ? ` (${existing.name})` : ''}. Promote this account to ${body.role}?`,
+        { existingUserId: existing.id, existingName: existing.name, role: body.role },
+      );
+    }
+    // Promote: keep their account, orders + existing login untouched;
+    // just elevate role + grant permissions + set the job title.
+    const promoted = await prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        role: body.role,
+        jobTitle: body.jobTitle ?? null,
+        permissions: body.role === 'STAFF' ? body.permissions ?? [] : [],
+        ...(body.name ? { name: body.name } : {}),
+      },
+      select: STAFF_SELECT,
+    });
+    logger.info('staff.promoted_from_customer', {
+      userId: promoted.id,
+      role: promoted.role,
+    });
+    return {
+      ...promoted,
+      effectivePermissions: Array.from(
+        effectiveCapabilities(promoted.role as StaffRole, promoted.permissions),
+      ),
+    };
   }
 
+  // Brand-new account — password is required here (the schema makes it
+  // optional only so the promote path above can omit it).
+  if (!body.password) {
+    throw HttpError.badRequest('A password is required for a new account.');
+  }
   const passwordHash = await bcrypt.hash(body.password, BCRYPT_ROUNDS);
   const created = await prisma.user.create({
     data: {
