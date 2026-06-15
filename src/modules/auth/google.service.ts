@@ -230,6 +230,7 @@ function toPublic(user: User): PublicUser {
     permissions,
     marketingOptIn: user.marketingOptIn,
     smsOptIn: user.smsOptIn,
+    wrapOptOut: user.wrapOptOut,
     birthDate: user.birthDate ? user.birthDate.toISOString().slice(0, 10) : null,
     createdAt: user.createdAt.toISOString(),
   };

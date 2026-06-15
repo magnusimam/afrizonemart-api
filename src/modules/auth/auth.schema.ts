@@ -81,6 +81,10 @@ export const updateMeBodySchema = z
     /// unsubscribe path when the customer is signed in.
     marketingOptIn: z.boolean().optional(),
     smsOptIn: z.boolean().optional(),
+    /// Afrizonemart Wrap opt-out. true = exclude this user from the
+    /// annual wrap (no snapshot computed, no reveal). Flip from
+    /// /account/profile.
+    wrapOptOut: z.boolean().optional(),
     /// 2026-05-16 Phase 2 — date-only birth date (ISO yyyy-mm-dd).
     /// Stored as a UTC midnight timestamp; only month + day matter
     /// for the birthday-bonus cron. Null clears.
