@@ -116,7 +116,16 @@ const envSchema = z.object({
   /// Magnus is his numeric user id; a group is the negative group id.
   /// Empty / unset → dispatcher no-ops cleanly. See the
   /// [[telegram-order-alerts]] memory for how to obtain a chat id.
+  /// Doubles as the allow-list for inbound bot commands — only these
+  /// chats get real order data back from /today, /recent, etc.
   ORDER_NOTIFY_TELEGRAM_CHAT_ID: z.string().optional(),
+  /// Shared secret for the inbound Telegram webhook. Passed to
+  /// setWebhook as `secret_token`; Telegram echoes it back in the
+  /// `X-Telegram-Bot-Api-Secret-Token` header on every update, and
+  /// `/api/telegram/webhook` rejects any request that doesn't match.
+  /// When unset the webhook route 503s (interactive commands off);
+  /// outbound alerts are unaffected.
+  TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
 
   /// Mobile app version gate — `GET /api/app/version-gate` reads
   /// these on every call so we can flip them via Railway env

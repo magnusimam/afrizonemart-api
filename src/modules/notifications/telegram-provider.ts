@@ -33,6 +33,43 @@ export interface TelegramMessage {
   /// a small subset of HTML (<b>, <i>, <a href>). Non-markup text
   /// MUST be escaped with escapeHtml() before interpolation.
   text: string;
+  /// Optional Telegram reply_markup (e.g. an inline keyboard). Alerts
+  /// don't use it; the interactive command handler passes nav buttons.
+  replyMarkup?: unknown;
+}
+
+/**
+ * Low-level Telegram Bot API client — one fetch wrapper shared by the
+ * outbound alert provider AND the inbound command handler
+ * (`modules/telegram`). Reads the token from env, POSTs JSON, and
+ * throws a descriptive error on transport failure OR logical failure
+ * (Telegram returns HTTP 200 with `ok:false` for bad chat ids etc.).
+ * Returns the unwrapped `result` on success.
+ */
+export async function callBotApi<T = unknown>(
+  method: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    throw new Error(`callBotApi(${method}): TELEGRAM_BOT_TOKEN not set`);
+  }
+  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    description?: string;
+    result?: T;
+  };
+  if (!res.ok || !json.ok) {
+    throw new Error(
+      `Telegram ${method} failed: ${res.status} ${json.description ?? ''}`.trim(),
+    );
+  }
+  return json.result as T;
 }
 
 export interface TelegramProvider {
@@ -72,45 +109,18 @@ export class ConsoleTelegramProvider implements TelegramProvider {
  */
 export class BotApiTelegramProvider implements TelegramProvider {
   readonly name = 'bot-api';
-  constructor(private readonly botToken: string) {}
 
   async send(msg: TelegramMessage): Promise<{ id: string }> {
-    const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
-    const body = {
+    const result = await callBotApi<{ message_id: number }>('sendMessage', {
       chat_id: msg.chatId,
       text: msg.text,
       parse_mode: 'HTML',
       /// Order links would otherwise expand into a bulky link card
       /// under every alert — suppress it, the text is the point.
       disable_web_page_preview: true,
-    };
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      ...(msg.replyMarkup ? { reply_markup: msg.replyMarkup } : {}),
     });
-    if (!res.ok) {
-      let detail = '';
-      try {
-        detail = await res.text();
-      } catch {
-        /* ignore */
-      }
-      throw new Error(`Telegram send failed: ${res.status} ${detail}`);
-    }
-    const json = (await res.json()) as {
-      ok: boolean;
-      description?: string;
-      result?: { message_id: number };
-    };
-    /// Telegram returns HTTP 200 with `ok:false` for logical errors
-    /// (bad chat id, bot blocked). Treat that as a hard failure too
-    /// so it lands in telegram.send_failed with the real reason.
-    if (!json.ok) {
-      throw new Error(`Telegram send rejected: ${json.description ?? 'ok:false'}`);
-    }
-    const id = json.result?.message_id?.toString() ?? `tg-unknown`;
-    return { id };
+    return { id: result?.message_id?.toString() ?? 'tg-unknown' };
   }
 }
 
@@ -123,7 +133,7 @@ let provider: TelegramProvider | null = null;
 export function telegramProvider(): TelegramProvider {
   if (provider) return provider;
   if (env.TELEGRAM_BOT_TOKEN) {
-    provider = new BotApiTelegramProvider(env.TELEGRAM_BOT_TOKEN);
+    provider = new BotApiTelegramProvider();
     logger.info('telegram.provider_selected', { provider: 'bot-api' });
   } else {
     provider = new ConsoleTelegramProvider();
