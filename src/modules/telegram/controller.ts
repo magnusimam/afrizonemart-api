@@ -39,9 +39,6 @@ interface TgUpdate {
   };
 }
 
-const UNAUTHORIZED =
-  "⛔ You're not authorised to use this bot. If you think this is a mistake, contact the Afrizonemart admin.";
-
 function isAuthorized(chatId: string): boolean {
   return adminChatIds().includes(chatId);
 }
@@ -82,7 +79,9 @@ async function handleUpdate(update: TgUpdate): Promise<void> {
     const cmd = parseCommand(update.message.text);
     if (!cmd) return; // plain chatter — ignore
     if (!isAuthorized(chatId)) {
-      await callBotApi('sendMessage', { chat_id: chatId, text: UNAUTHORIZED });
+      /// Go completely silent — don't confirm the bot exists or that
+      /// the command was understood. Logging lets us see probe attempts.
+      logger.warn('telegram.unauthorized', { chatId, cmd });
       return;
     }
     logger.info('telegram.command', { chatId, cmd });
@@ -101,7 +100,7 @@ async function handleUpdate(update: TgUpdate): Promise<void> {
     );
     if (!chatId) return;
     if (!isAuthorized(chatId)) {
-      await callBotApi('sendMessage', { chat_id: chatId, text: UNAUTHORIZED });
+      logger.warn('telegram.unauthorized_callback', { chatId, data: cq.data });
       return;
     }
     const cmd = cq.data ? CALLBACK_COMMANDS[cq.data] : undefined;
