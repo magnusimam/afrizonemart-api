@@ -106,6 +106,18 @@ const envSchema = z.object({
   /// supported but #1 use case is "send to Magnus's WhatsApp".
   ORDER_NOTIFY_WHATSAPP_TO: z.string().optional(),
 
+  /// Telegram admin order-alert pipeline (2026-07-13). Interim
+  /// channel while WhatsApp is blocked on Meta verification. When
+  /// TELEGRAM_BOT_TOKEN is set the real Bot API provider is selected;
+  /// otherwise the ConsoleTelegramProvider logs to stdout (dev mode).
+  /// Token comes from @BotFather, looks like "123456789:AA...".
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  /// Comma-separated Telegram chat ids the alerts fan out to. A DM to
+  /// Magnus is his numeric user id; a group is the negative group id.
+  /// Empty / unset → dispatcher no-ops cleanly. See the
+  /// [[telegram-order-alerts]] memory for how to obtain a chat id.
+  ORDER_NOTIFY_TELEGRAM_CHAT_ID: z.string().optional(),
+
   /// Mobile app version gate — `GET /api/app/version-gate` reads
   /// these on every call so we can flip them via Railway env
   /// without a code deploy when a critical bug ships. Format:

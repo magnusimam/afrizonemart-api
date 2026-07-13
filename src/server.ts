@@ -50,6 +50,7 @@ import { startScheduledBlogCron } from '@/modules/blog/cron';
 import { startWebhookDispatcher } from '@/modules/webhooks/dispatcher';
 import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
 import { startWhatsAppDispatcher } from '@/modules/notifications/whatsapp-dispatcher';
+import { startTelegramDispatcher } from '@/modules/notifications/telegram-dispatcher';
 import { startPushDispatcher } from '@/modules/notifications/push-dispatcher';
 import { startCourierAutoMarkCron } from '@/modules/courier/auto-mark-cron';
 import { startReviewNudgeCron } from '@/modules/reviews/review-nudge-cron';
@@ -291,6 +292,7 @@ async function start() {
   startWebhookDispatcher();
   startNotificationDispatcher();
   startWhatsAppDispatcher();
+  startTelegramDispatcher();
   startPushDispatcher();
   startCourierAutoMarkCron();
   startReviewNudgeCron();
