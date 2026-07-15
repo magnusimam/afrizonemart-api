@@ -156,6 +156,10 @@ const envSchema = z.object({
   // button is enabled. The same client id is exposed on the frontend
   // via NEXT_PUBLIC_GOOGLE_CLIENT_ID.
   GOOGLE_CLIENT_ID: z.string().optional(),
+  // Optional second client ID for the mobile app (Desktop app type in
+  // Google Cloud Console). When set, the API accepts tokens from both
+  // the web client and the mobile client.
+  GOOGLE_MOBILE_CLIENT_ID: z.string().optional(),
 
   // Twilio Verify — phone/SMS auth. When all three are set, the
   // /api/auth/phone/* endpoints are functional. Without them they

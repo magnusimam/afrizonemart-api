@@ -20,8 +20,15 @@ function client(): OAuth2Client {
       'Google sign-in is not configured. Set GOOGLE_CLIENT_ID on the API.',
     );
   }
-  if (!cachedClient) cachedClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+  if (!cachedClient) cachedClient = new OAuth2Client();
   return cachedClient;
+}
+
+/** All client IDs we accept tokens from (web + optional mobile). */
+function allowedClientIds(): string[] {
+  const ids = [env.GOOGLE_CLIENT_ID].filter(Boolean) as string[];
+  if (env.GOOGLE_MOBILE_CLIENT_ID) ids.push(env.GOOGLE_MOBILE_CLIENT_ID);
+  return ids;
 }
 
 export interface GoogleSignInResult {
@@ -48,7 +55,7 @@ export interface GoogleChallenge {
  * single-use consume against this row.
  */
 export async function createGoogleChallenge(): Promise<GoogleChallenge> {
-  if (!env.GOOGLE_CLIENT_ID) {
+  if (!env.GOOGLE_CLIENT_ID && !env.GOOGLE_MOBILE_CLIENT_ID) {
     throw HttpError.badRequest(
       'Google sign-in is not configured. Set GOOGLE_CLIENT_ID on the API.',
     );
@@ -102,11 +109,12 @@ export async function signInWithGoogle(
     throw HttpError.unauthorized('Google sign-in challenge is invalid or expired.');
   }
 
+  const clientIds = allowedClientIds();
   let ticket;
   try {
     ticket = await client().verifyIdToken({
       idToken,
-      audience: env.GOOGLE_CLIENT_ID!,
+      audience: clientIds,
     });
   } catch (err) {
     logger.warn('auth.google.verify_failed', {
@@ -124,12 +132,13 @@ export async function signInWithGoogle(
   // token to the challenge we just consumed; `azp` (authorized party,
   // OIDC §2) ensures the token was minted for our own client_id —
   // defends against a different Google project's token being replayed
-  // here even when both share an `aud`.
+  // here even when both share an `aud`. Accept any of our known client
+  // IDs (web + optional mobile Desktop app client).
   if (payload.nonce !== nonce) {
     logger.warn('auth.google.nonce_mismatch');
     throw HttpError.unauthorized('Google token nonce mismatch.');
   }
-  if (payload.azp && payload.azp !== env.GOOGLE_CLIENT_ID) {
+  if (payload.azp && !clientIds.includes(payload.azp)) {
     logger.warn('auth.google.azp_mismatch', { azp: payload.azp });
     throw HttpError.unauthorized('Google token authorized party mismatch.');
   }
