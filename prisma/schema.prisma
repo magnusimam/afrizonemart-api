@@ -245,6 +245,12 @@ model Product {
   comparePrice     Int?
   discountPercent  Int?
   origin           String? // 2-letter ISO country code, e.g. "NG", "KE"
+  /// Countries this product can be sold/shipped to, ISO-2 codes from the
+  /// canonical 54-country list (afrizonemart-v2/src/lib/countries.ts).
+  /// Empty array = sellable everywhere (default). `origin` is always
+  /// implicitly sellable even if not listed here — enforced at the
+  /// read/check site, not by mutating this array.
+  sellableCountries String[] @default([])
   /// Phase 11 — shipping weight in kilograms. Used by the shipping
   /// quote algorithm to pick the right weight bracket. Nullable so
   /// existing rows don't break; the quote engine treats null as

@@ -42,6 +42,23 @@ export async function placeOrder(userId: string, body: PlaceOrderBody) {
     );
   }
 
+  /// New sellable-countries restriction — the real enforcement gate.
+  /// A client-side disabled button is UX only; this is what actually
+  /// stops payment for a product not sold in the customer's region.
+  /// Empty `sellableCountries` = unrestricted. A product's own `origin`
+  /// is always implicitly sellable there even if not explicitly listed.
+  const shipCountry = body.shipping.country.toUpperCase();
+  const blockedLine = cart.items.find((i) => {
+    const allowed = i.product.sellableCountries;
+    if (allowed.length === 0) return false;
+    return !allowed.includes(shipCountry) && i.product.origin?.toUpperCase() !== shipCountry;
+  });
+  if (blockedLine) {
+    throw HttpError.badRequest(
+      `"${blockedLine.product.name}" isn't available in your region yet — please remove it before checkout.`,
+    );
+  }
+
   const subtotal = cart.items.reduce(
     (sum, i) => sum + i.productVariant.priceNgn * i.quantity,
     0,

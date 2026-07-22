@@ -80,6 +80,25 @@ export async function findProducts(query: ListProductsQuery) {
   if (query.placement) {
     Object.assign(where, placementFilter(query.placement, query.country?.toUpperCase()));
   }
+  // "Ships to my country" shop filter — independent of `inStock`. Only
+  // takes effect when a `country` is known; otherwise there's nothing to
+  // match against and the filter is a silent no-op rather than an error.
+  // Combined via `where.AND` (not `where.OR`) since `query.q` above may
+  // already own `where.OR` for its search-term matching.
+  if (query.shipsToMe === true && query.country) {
+    const c = query.country.toUpperCase();
+    const existingAnd = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+    where.AND = [
+      ...existingAnd,
+      {
+        OR: [
+          { sellableCountries: { isEmpty: true } },
+          { sellableCountries: { has: c } },
+          { origin: c },
+        ],
+      },
+    ];
+  }
 
   /// Trending sort short-circuits the image-priority dance below.
   /// Trending products are by definition the ones customers are

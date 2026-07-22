@@ -253,6 +253,7 @@ export async function reviewProductSubmission(
       price: sub.price,
       comparePrice: sub.comparePrice ?? null,
       origin: sub.origin ?? null,
+      sellableCountries: [],
       weightKg: sub.weightKg ?? null,
       inStock: true,
       rating: 0,
