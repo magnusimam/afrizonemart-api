@@ -39,6 +39,13 @@ export const listProductsQuerySchema = z.object({
     .enum(['true', 'false'])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
+  /// Storefront filter sidebar — "Ships to my country". Independent of
+  /// `inStock`; only takes effect when `country` is also set (repository
+  /// falls back to no-op otherwise, since there's nothing to match against).
+  shipsToMe: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
   /// Storefront filter sidebar — min/max product price in Naira whole
   /// units (matches `Product.price` storage). Either bound can be set
   /// independently. Repository applies `where.price = { gte/lte }`.

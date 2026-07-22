@@ -26,6 +26,12 @@ export const upsertProductBodySchema = z.object({
   price: z.number().int().nonnegative(),
   comparePrice: z.number().int().nonnegative().nullish(),
   origin: z.string().length(2).nullish(),
+  /// Countries this product can be sold/shipped to. Empty = sellable
+  /// everywhere. `origin` is always implicitly included even if not
+  /// listed here (enforced where the list is read, not stored here).
+  sellableCountries: z
+    .array(z.string().length(2).transform((s) => s.toUpperCase()))
+    .default([]),
   /// Phase 11 — shipping weight in kilograms. Drives the shipping
   /// quote engine. Null is allowed; the quote engine substitutes
   /// 0.5 kg by default.
