@@ -48,6 +48,13 @@ model User {
   /// permissions array drives what they can do. Surfaced in the admin
   /// staff list and on the staff member's dashboard greeting.
   jobTitle         String?
+  /// Structured department label for STAFF accounts (e.g. "Marketing",
+  /// "Finance"). Free-text so new departments don't need a migration,
+  /// but the known set in src/lib/permissions.ts (DEPARTMENT_PRESETS)
+  /// drives a one-click capability bundle in the staff editor. Purely
+  /// a label + preset trigger — does NOT itself grant access; the
+  /// permissions array is still what's checked at request time.
+  department       String?
   // Refresh tokens are hashed before storage so a DB leak doesn't grant
   // session access. Null when the user has logged out everywhere.
   refreshTokenHash String?
