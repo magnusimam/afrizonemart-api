@@ -201,3 +201,42 @@ export function hasCapability(
 ): boolean {
   return effectiveCapabilities(role, userPermissions).has(capability);
 }
+
+/**
+ * Named department → starter capability bundle. `User.department` is a
+ * free-text label (new departments don't need a migration), but picking
+ * one of these known names in the staff editor one-click-fills the
+ * permissions checkbox matrix with a sensible starting set — still
+ * hand-editable afterward, and re-saving never re-applies the preset
+ * silently. Deliberately excludes `staff.manage`, `settings.write`,
+ * `payment-gateways.write`, `webhooks.write` — those stay opt-in per
+ * person, not bundled into a department.
+ */
+export const DEPARTMENT_PRESETS: Record<string, Capability[]> = {
+  Marketing: [
+    'content.write',
+    'blog.write',
+    'placements.write',
+    'cms-pages.write',
+    'coupons.write',
+    'analytics.read',
+  ],
+  Finance: ['orders.read', 'orders.refund', 'payouts.write', 'reports.read', 'loyalty.read'],
+  Operations: [
+    'products.read',
+    'products.write',
+    'categories.write',
+    'orders.write',
+    'shipping.write',
+    'intern.review',
+    'reports.read',
+  ],
+  Communications: [
+    'notifications.write',
+    'email-templates.write',
+    'reviews.moderate',
+    'customers.read',
+  ],
+};
+
+export const DEPARTMENT_NAMES = Object.keys(DEPARTMENT_PRESETS);

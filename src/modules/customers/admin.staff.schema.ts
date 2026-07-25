@@ -14,6 +14,12 @@ export const createStaffBodySchema = z
     /// ("Intern", "Customer Support Lead", etc.). Cosmetic; does NOT
     /// grant access. Permissions still drive what they can do.
     jobTitle: z.string().trim().min(1).max(80).optional(),
+    /// Structured department label (e.g. "Marketing"). Free text so a
+    /// new department doesn't need a migration; known names in
+    /// DEPARTMENT_PRESETS drive the one-click preset in the staff
+    /// editor. Cosmetic + preset-trigger only — does NOT itself grant
+    /// access.
+    department: z.string().trim().min(1).max(60).optional(),
     /// Used when role=STAFF — the per-user capability grants. Ignored
     /// for SELLER and ADMIN (those use their role-default capabilities).
     permissions: z.array(z.enum(ALL_CAPABILITIES as [string, ...string[]])).optional(),
@@ -39,6 +45,8 @@ export const updateStaffBodySchema = z.object({
   permissions: z.array(z.enum(ALL_CAPABILITIES as [string, ...string[]])).optional(),
   /// Pass null to clear the title; pass a string to update; omit to leave alone.
   jobTitle: z.string().trim().min(1).max(80).nullable().optional(),
+  /// Pass null to clear the department; pass a string to update; omit to leave alone.
+  department: z.string().trim().min(1).max(60).nullable().optional(),
   /// Optional password reset by the admin. Setting null/undefined leaves
   /// the existing hash in place.
   password: z.string().min(8).max(128).optional(),
