@@ -127,6 +127,14 @@ async function sendAlert(
         shipCountry: true,
         shipFullName: true,
         user: { select: { name: true } },
+        items: {
+          select: {
+            productName: true,
+            quantity: true,
+            bundleLabel: true,
+            variantLabel: true,
+          },
+        },
       },
     });
     if (!order) {
@@ -139,6 +147,11 @@ async function sendAlert(
     const destination = [order.shipCity, order.shipCountry]
       .filter(Boolean)
       .join(', ');
+    const itemLines = order.items.map((item) => {
+      const label = item.variantLabel || item.bundleLabel;
+      const suffix = label ? ` (${escapeHtml(label)})` : '';
+      return `  • ${item.quantity}x ${escapeHtml(item.productName)}${suffix}`;
+    });
 
     /// Blank line between the headline and the order summary; extra
     /// context lines (if any) sit under the summary block.
@@ -150,6 +163,7 @@ async function sendAlert(
       `Customer: ${escapeHtml(customerName)}`,
       ...(destination ? [`Ship to: ${escapeHtml(destination)}`] : []),
       `Status: ${escapeHtml(order.status)}`,
+      ...(itemLines.length ? ['Items:', ...itemLines] : []),
       ...extra,
       '',
       `<a href="${env.WEB_URL}/admin/orders/${order.id}">Open in admin →</a>`,
