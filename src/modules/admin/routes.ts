@@ -31,6 +31,11 @@ import { adminBlogRoutes } from '@/modules/blog/admin.routes';
 import { adminContentRoutes } from '@/modules/content/admin.routes';
 import { adminInternRoutes } from '@/modules/intern/admin.routes';
 import { adminProductSubmissionRoutes } from '@/modules/product-submissions/admin.routes';
+import { adminSupplierRoutes } from '@/modules/suppliers/admin.routes';
+import { adminFacilityVisitRoutes } from '@/modules/suppliers/admin.visit.routes';
+import { adminSupplierAuditRoutes } from '@/modules/suppliers/admin.audit.routes';
+import { adminOrientationRoutes } from '@/modules/suppliers/admin.orientation.routes';
+import { adminTradeRoutes } from '@/modules/suppliers/admin.trade.routes';
 import { adminInternPayoutRoutes } from '@/modules/payouts/routes';
 import { adminLoyaltyRoutes } from '@/modules/loyalty/admin.routes';
 
@@ -109,6 +114,11 @@ adminRouter.use('/custom-fields', requireCapability('custom-fields.write'), admi
 adminRouter.use('/payment-gateways', requireCapability('payment-gateways.write'), adminPaymentRoutes);
 adminRouter.use('/payment-methods', requireCapability('payment-gateways.write'), adminPaymentMethodRoutes);
 adminRouter.use('/feature-flags', requireCapability('feature-flags.write'), adminFeatureFlagRoutes);
+adminRouter.use('/suppliers', requireCapability('suppliers.review'), adminSupplierRoutes);
+adminRouter.use('/facility-visits', requireCapability('suppliers.visits'), adminFacilityVisitRoutes);
+adminRouter.use('/supplier-audits', requireCapability('suppliers.audit'), adminSupplierAuditRoutes);
+adminRouter.use('/orientation', requireCapability('suppliers.review'), adminOrientationRoutes);
+adminRouter.use('/trade', requireCapability('suppliers.trade'), adminTradeRoutes);
 adminRouter.use('/loyalty', requireCapability('loyalty.read'), adminLoyaltyRoutes);
 adminRouter.use('/business-rules', requireCapability('business-rules.write'), adminBusinessRuleRoutes);
 adminRouter.use('/pages', requireCapability('cms-pages.write'), adminCmsRoutes);

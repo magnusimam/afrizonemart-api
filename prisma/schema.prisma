@@ -158,6 +158,10 @@ model User {
   /// false (= opted in). Customers can flip via account
   /// settings. Aggregation cron skips opted-out users.
   wrapOptOut              Boolean                  @default(false)
+  /// 2026-06-12 — Supplier portal. A user becomes a supplier by
+  /// having this profile (no separate role/login). Its existence is
+  /// what RequireSupplier gates on. Existing AZM users keep one login.
+  supplierProfile         SupplierProfile?         @relation("UserSupplier")
 
   @@index([email])
   @@index([phone])
@@ -2177,4 +2181,315 @@ model Referral {
   @@index([referrerUserId, status])
   @@index([scheduledPayoutAt])
   @@index([status])
+}
+
+// -----------------------------------------------------------------
+// Supplier portal domain (2026-06-12)
+// One profile per User; existence = supplier-portal access. The
+// 10-stage onboarding journey is tracked by `currentStage`. Later
+// phases add ProductPIQ / FacilityVisit / Partnership / etc., all
+// keyed off SupplierProfile.id.
+// -----------------------------------------------------------------
+
+enum SupplierStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model SupplierProfile {
+  id           String         @id @default(cuid())
+  userId       String         @unique
+  user         User           @relation("UserSupplier", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Captured at apply / Expression of Interest.
+  companyName  String
+  contactName  String
+  phone        String?
+  country      String
+  region       String?
+  category     String
+
+  /// 1–10 — where the supplier is in the onboarding journey.
+  currentStage Int            @default(1)
+  status       SupplierStatus @default(ACTIVE)
+
+  /// Registration & Profiling (Stage 3) — filled later, hence optional.
+  legalName          String?
+  regNumber          String?
+  taxId              String?
+  yearEstablished    Int?
+  employees          Int?
+  factoryType        String?
+  factoryAddress     String?
+  businessLicenseUrl String?
+
+  /// Expression of Interest answers (keyed by EOI form field ids), kept so
+  /// the supplier sees everything they originally filled.
+  eoiAnswers   Json?
+  /// Answers for the supplier-filled journey forms, keyed by stage number
+  /// ("1" Discovery, "2" EoI, "3" Registration) → { fieldId: value }.
+  stageAnswers Json?
+  /// Cooperative / cluster sponsor (e.g. "WETI"), when applicable.
+  cluster      String?
+  /// Provenance for bulk-migrated suppliers: 'sheet-import' or null.
+  source       String?
+  importedAt   DateTime?
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  piqs          ProductPIQ[]
+  facilityVisit FacilityVisit?
+  audit         SupplierAudit?
+  reviewCall    ReviewCall?
+  orientationComments OrientationComment[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum POStatus {
+  ISSUED        // AZM Procurement issued it
+  ACKNOWLEDGED  // supplier confirmed receipt/terms
+  FULFILLED     // supplier shipped/delivered
+  CANCELLED
+}
+
+/// Stage 9 — Procurement & Trade. A purchase order AZM issues to an activated
+/// supplier. Items are stored as JSON line rows; the supplier acknowledges and
+/// then marks fulfilled from the portal.
+model PurchaseOrder {
+  id          String          @id @default(cuid())
+  supplierId  String
+  supplier    SupplierProfile @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  poNumber    String          @unique
+  status      POStatus        @default(ISSUED)
+  /// Line items: [{ product, qty, unit, unitPrice }].
+  items       Json            @default("[]")
+  currency    String          @default("NGN")
+  totalAmount Float           @default(0)
+  dueDate     DateTime?
+  notes       String?
+
+  acknowledgedAt DateTime?
+  fulfilledAt    DateTime?
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([supplierId])
+  @@index([status])
+}
+
+enum ReviewCallStatus {
+  PENDING            // awaiting AZM to schedule
+  SCHEDULED
+  RESCHEDULE_REQUESTED // supplier proposed a new time
+  COMPLETED
+  CANCELLED
+}
+
+/// Stage 5, Step 1 — the PIQ review call (Merchandise Sourcing Unit). One per
+/// supplier. AZM schedules the slot; the supplier may request a reschedule up
+/// to a cutoff before the meeting. Both sides get add-to-calendar links.
+model ReviewCall {
+  id          String           @id @default(cuid())
+  supplierId  String           @unique
+  supplier    SupplierProfile  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  status      ReviewCallStatus @default(PENDING)
+  scheduledAt DateTime?
+  /// e.g. "Google Meet", "Zoom", "Phone".
+  meetingMode String?
+  meetingLink String?
+  notes       String?
+
+  /// Supplier-proposed new time when requesting a reschedule.
+  proposedAt      DateTime?
+  rescheduleCount Int        @default(0)
+
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([status])
+}
+
+/// A supplier's comment/question posted during the "live" orientation webinar.
+/// Saved so the Supplier Relations Desk can follow up — many are real questions.
+model OrientationComment {
+  id         String          @id @default(cuid())
+  supplierId String
+  supplier   SupplierProfile @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  body       String
+  /// Seconds into the session when posted (context for replay).
+  atSeconds  Int?
+  /// Admin triage.
+  isQuestion Boolean         @default(false)
+  answeredAt DateTime?
+  adminNote  String?
+
+  createdAt  DateTime        @default(now())
+
+  @@index([supplierId])
+  @@index([createdAt])
+}
+
+enum FacilityVisitStatus {
+  REQUESTED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+/// Stage 6 — facility visit. One per supplier. The supplier proposes a
+/// preferred date; the Facility Visit team confirms the actual date + lead.
+/// (The per-category on-site audit form lands later.)
+model FacilityVisit {
+  id             String              @id @default(cuid())
+  supplierId     String              @unique
+  supplier       SupplierProfile     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  status         FacilityVisitStatus @default(REQUESTED)
+  preferredDate  String?
+  address        String?
+  contactPhone   String?
+
+  confirmedDate  DateTime?
+  confirmedWindow String?
+  leadName       String?
+  leadPhone      String?
+  notes          String?
+
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([status])
+}
+
+/// Per-criterion verdict on the Supplier Product-Commodity Audit (SP-CA).
+enum AuditStatus {
+  DRAFT
+  COMPLETED
+}
+
+/// Final verdict from the indicative score + Critical-finding rule.
+enum AuditOutcome {
+  APPROVED    // no Critical, ≤3 Major
+  PROVISIONAL // onboard with mandatory CAPA
+  REJECTED    // any Critical, or score below threshold
+}
+
+/// Stage 6 — Supplier Product-Commodity Audit (SP-CA). One per supplier,
+/// filled by the Quality & Compliance unit using the category-specific
+/// template (AUDIT_TEMPLATES). Each checkpoint is rated C/M/Mi/O/Cpt/NA with
+/// findings; completing computes the indicative score + outcome and generates
+/// the diagnostic report the supplier sees.
+model SupplierAudit {
+  id         String          @id @default(cuid())
+  supplierId String          @unique
+  supplier   SupplierProfile @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  status     AuditStatus     @default(DRAFT)
+  /// Which template/category: 'A'..'F'.
+  category   String?
+
+  /// Scope/metadata fields (facility location/type, intended market, products…).
+  metadata     Json?
+  /// Pre-visit document checklist ticks: { docLabel: boolean }.
+  preVisitDocs Json?
+  /// Per-checkpoint responses: { checkpointId: { rating, findings } }.
+  responses    Json?
+  /// CAPA tracker rows.
+  capa         Json?
+
+  /// Computed on complete.
+  indicativeScore Int?
+  /// Finding counts: { critical, major, minor, observation, compliant, na }.
+  counts          Json?
+  outcome         AuditOutcome?
+
+  /// Auditor prose for the report.
+  summary         String?
+  recommendations String?
+
+  auditorName String?
+  conductedAt DateTime?
+
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([status])
+}
+
+enum PIQStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REVISION_REQUIRED
+  REJECTED
+}
+
+model ProductPIQ {
+  id          String          @id @default(cuid())
+  supplierId  String
+  supplier    SupplierProfile @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  name        String
+  brand       String?
+  category    String?
+  status      PIQStatus       @default(DRAFT)
+  /// 0–100 — share of required fields answered.
+  completion  Int             @default(0)
+  /// Answers keyed by PIQ config field id.
+  answers     Json            @default("{}")
+
+  /// Reviewer output when status = REVISION_REQUIRED: an overall note +
+  /// per-field feedback ({ questionId: message }). Cleared on approve.
+  reviewSummary String?
+  feedback      Json?
+
+  /// Provenance for bulk-migrated products.
+  source      String?
+  sourceRef   String?
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([supplierId])
+  @@index([status])
+}
+
+/// A long-lived, revocable bearer credential for a machine consumer of the
+/// API (e.g. the B.I.L.L.I.E. voice assistant). Deliberately NOT a user
+/// login: no password, no refresh cookie, no session — just a hashed secret
+/// with an explicit scope list.
+///
+/// The plaintext token is shown once at creation and never stored; only its
+/// SHA-256 hash lives here, so a database leak can't be replayed against the
+/// API. `readOnly` is enforced at the middleware layer (any non-GET request
+/// is rejected) as a belt-and-braces guard on top of `scopes`.
+model ServiceToken {
+  id         String    @id @default(cuid())
+  /// Human label — who/what holds this token, e.g. "billie-voice-assistant".
+  name       String    @unique
+  /// SHA-256 of the plaintext token. Never store the token itself.
+  tokenHash  String    @unique
+  /// Capability strings this token may exercise, e.g. ["suppliers.read"].
+  scopes     String[]  @default([])
+  /// When true the token may only issue GET requests.
+  readOnly   Boolean   @default(true)
+  /// Optional expiry. Null = no automatic expiry (revoke manually).
+  expiresAt  DateTime?
+  /// Set to revoke. A revoked token is rejected even before expiry.
+  revokedAt  DateTime?
+  /// Touched (throttled) on use, so a stale credential is easy to spot.
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([revokedAt])
 }

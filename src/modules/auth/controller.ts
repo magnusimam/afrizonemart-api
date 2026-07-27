@@ -50,7 +50,7 @@ function refreshCookieOptions(): CookieOptions {
   };
 }
 
-function setRefreshCookie(res: Response, refreshToken: string): void {
+export function setRefreshCookie(res: Response, refreshToken: string): void {
   res.cookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions());
 }
 

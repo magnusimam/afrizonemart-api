@@ -46,6 +46,18 @@ const envSchema = z.object({
 
   WEB_URL: z.string().url().default('http://localhost:3737'),
 
+  // Orientation webinar (Stage 5) — the evergreen "live" session.
+  // Local file streamed via /api/orientation/video in dev; in prod set
+  // ORIENTATION_VIDEO_URL to a CDN/R2 URL and the API hands that out instead.
+  ORIENTATION_VIDEO_PATH: z
+    .string()
+    .default('./video/utf-qtge-orn (2026-02-26 14_02 GMT).mp4'),
+  ORIENTATION_VIDEO_URL: z.string().url().optional(),
+  // Daily go-live time in UTC. 21:00 WAT (West Africa, UTC+1) = 20:00 UTC.
+  ORIENTATION_LIVE_HOUR_UTC: z.coerce.number().int().min(0).max(23).default(20),
+  // Minutes after go-live during which a supplier may still join.
+  ORIENTATION_JOIN_WINDOW_MINS: z.coerce.number().int().positive().default(30),
+
   // Uploads — pluggable storage backend.
   // `local`: writes to UPLOADS_LOCAL_DIR, served via express.static at /uploads/*.
   // `r2`:    Cloudflare R2 (TODO — needs R2_* keys when provisioning lands).
