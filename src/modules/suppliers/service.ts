@@ -449,12 +449,37 @@ async function ownedPIQ(userId: string, id: string) {
 }
 
 /** PUT /me/piqs/:id — autosave answers / name / completion. */
+/**
+ * A supplier may only edit a questionnaire that is theirs to work on.
+ *
+ * DRAFT is obvious. REVISION_REQUIRED is the whole point of the revision
+ * loop — the reviewer asked for changes, so changes must be possible.
+ *
+ * Everything else is locked:
+ *  - SUBMITTED / UNDER_REVIEW — a reviewer is reading it. Without this a
+ *    supplier could rewrite the answers underneath them and get an approval
+ *    for something the reviewer never saw.
+ *  - APPROVED — approval has to mean the thing that was approved. This is a
+ *    compliance programme; silently editing an approved product's answers
+ *    afterwards would make the audit trail worthless.
+ *  - REJECTED — terminal. Start a new product instead.
+ */
+const EDITABLE_PIQ_STATUSES = new Set(['DRAFT', 'REVISION_REQUIRED']);
+
 export async function updatePIQ(
   userId: string,
   id: string,
   body: UpdatePIQBody,
 ): Promise<PublicPIQ> {
-  await ownedPIQ(userId, id);
+  const existing = await ownedPIQ(userId, id);
+  if (!EDITABLE_PIQ_STATUSES.has(existing.status)) {
+    throw HttpError.badRequest(
+      existing.status === 'APPROVED'
+        ? 'This product has been approved and can no longer be edited. Contact the supplier desk if something needs to change.'
+        : 'This questionnaire is with our review team and cannot be edited until they respond.',
+    );
+  }
+
   const piq = await prisma.productPIQ.update({
     where: { id },
     data: {
@@ -472,6 +497,16 @@ export async function updatePIQ(
 /** POST /me/piqs/:id/submit — send for review. */
 export async function submitPIQ(userId: string, id: string): Promise<PublicPIQ> {
   const existing = await ownedPIQ(userId, id);
+
+  // Only a draft or a revision may be submitted. Re-submitting something
+  // already UNDER_REVIEW re-sent the acknowledgement email each time.
+  if (!EDITABLE_PIQ_STATUSES.has(existing.status)) {
+    throw HttpError.badRequest(
+      existing.status === 'APPROVED'
+        ? 'This product is already approved.'
+        : 'This questionnaire has already been submitted and is awaiting review.',
+    );
+  }
 
   // Server-side floor on what may enter the review queue.
   //
