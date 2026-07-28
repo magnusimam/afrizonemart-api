@@ -286,6 +286,71 @@ export async function getAudit(userId: string): Promise<PublicSupplierAudit | nu
   };
 }
 
+/**
+ * Facts we already hold about a supplier, mapped onto the field ids the
+ * journey forms use.
+ *
+ * The design rule is "never ask the same thing twice" (PORTAL_ROADMAP §3a):
+ * Apply already captured the company name, contact and country, so the EoI
+ * and Registration forms must arrive pre-filled rather than asking a supplier
+ * to retype what they typed sixty seconds earlier. The form engine renders
+ * these with an editable "Autofilled" chip.
+ */
+async function knownAnswers(
+  profile: {
+    userId: string;
+    companyName: string;
+    contactName: string;
+    phone: string | null;
+    country: string;
+    region: string | null;
+    legalName: string | null;
+    regNumber: string | null;
+    taxId: string | null;
+    yearEstablished: number | null;
+    employees: number | null;
+    factoryType: string | null;
+    factoryAddress: string | null;
+  },
+  stage: number,
+): Promise<Record<string, unknown>> {
+  const user = await prisma.user.findUnique({
+    where: { id: profile.userId },
+    select: { email: true },
+  });
+  const stateCountry = [profile.region, profile.country].filter(Boolean).join(', ');
+
+  if (stage === 2) {
+    return dropEmpty({
+      business_name: profile.companyName,
+      contact_name: profile.contactName,
+      contact_email: user?.email,
+      contact_phone: profile.phone,
+      state_country: stateCountry,
+    });
+  }
+  if (stage === 3) {
+    // Registration & Profiling — field ids per PROFILE_FORM in the web repo.
+    return dropEmpty({
+      legal_name: profile.legalName ?? profile.companyName,
+      registration_number: profile.regNumber,
+      tax_id: profile.taxId,
+      year_established: profile.yearEstablished,
+      num_employees: profile.employees,
+      factory_type: profile.factoryType,
+      factory_address: profile.factoryAddress,
+    });
+  }
+  return {};
+}
+
+/** Never seed a field with null/empty — an empty chip reads as a bug. */
+function dropEmpty(o: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(o).filter(([, v]) => v !== null && v !== undefined && v !== ''),
+  );
+}
+
 /** GET /me/stages/:stage — saved answers for a journey form (1–3). */
 export async function getStageAnswers(
   userId: string,
@@ -293,13 +358,18 @@ export async function getStageAnswers(
 ): Promise<Record<string, unknown>> {
   const profile = await profileOrThrow(userId);
   const all = (profile.stageAnswers as Record<string, Record<string, unknown>> | null) ?? {};
-  if (all[stage]) return all[stage];
+  const seed = await knownAnswers(profile, stage);
+
+  // Saved answers always win — the supplier may have corrected a seeded
+  // value, and we must never overwrite their edit with the profile again.
+  if (all[stage]) return { ...seed, ...all[stage] };
+
   // Stage 2 (EoI) falls back to imported eoiAnswers so the supplier sees
   // what they originally submitted on the Google form.
   if (stage === 2 && profile.eoiAnswers) {
-    return profile.eoiAnswers as Record<string, unknown>;
+    return { ...seed, ...(profile.eoiAnswers as Record<string, unknown>) };
   }
-  return {};
+  return seed;
 }
 
 /** PUT /me/stages/:stage — autosave a journey form's answers. */
