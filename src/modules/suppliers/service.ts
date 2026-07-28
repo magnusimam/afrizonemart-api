@@ -564,25 +564,13 @@ export async function updateSupplier(
     return toPublicSupplier(profile);
   }
 
+  // Only the self-serve fields — the schema is the allowlist, so anything
+  // else was already rejected as an unknown key by `.strict()`.
   const updated = await prisma.supplierProfile.update({
     where: { userId },
     data: {
-      ...(body.companyName !== undefined && { companyName: body.companyName }),
       ...(body.contactName !== undefined && { contactName: body.contactName }),
       ...(body.phone !== undefined && { phone: body.phone }),
-      ...(body.country !== undefined && { country: body.country }),
-      ...(body.region !== undefined && { region: body.region }),
-      ...(body.category !== undefined && { category: body.category }),
-      ...(body.legalName !== undefined && { legalName: body.legalName }),
-      ...(body.regNumber !== undefined && { regNumber: body.regNumber }),
-      ...(body.taxId !== undefined && { taxId: body.taxId }),
-      ...(body.yearEstablished !== undefined && { yearEstablished: body.yearEstablished }),
-      ...(body.employees !== undefined && { employees: body.employees }),
-      ...(body.factoryType !== undefined && { factoryType: body.factoryType }),
-      ...(body.factoryAddress !== undefined && { factoryAddress: body.factoryAddress }),
-      ...(body.businessLicenseUrl !== undefined && {
-        businessLicenseUrl: body.businessLicenseUrl,
-      }),
     },
   });
 

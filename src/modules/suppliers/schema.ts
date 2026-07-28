@@ -63,22 +63,36 @@ export const updatePIQBodySchema = z
   .strict();
 export type UpdatePIQBody = z.infer<typeof updatePIQBodySchema>;
 
+/**
+ * What a supplier may change about themselves, unassisted.
+ *
+ * This endpoint previously accepted the supplier's legal name, registration
+ * number, tax ID, factory address and business-licence URL — every identity
+ * and compliance field on the record — with no review. No UI exposed it, but
+ * the route was live to any authenticated supplier.
+ *
+ * The tiering below follows standard vendor-management practice:
+ *
+ *  - **Self-serve (here).** Operational contact details. Getting these wrong
+ *    only inconveniences the supplier, and forcing a support ticket to fix a
+ *    mistyped phone number is friction with no upside.
+ *
+ *  - **Reviewed change request** (via the supplier desk, not this endpoint):
+ *    legal name, registration number, tax ID, country, category, factory
+ *    address, business licence. These appear on the signed agreement, decide
+ *    which audit template applies, and define the facility-visit scope — a
+ *    silent change between an audit and a signature invalidates both.
+ *
+ *  - **Never self-serve, dual control:** bank/payout details. Supplier
+ *    payment-redirection is the classic invoice-fraud vector, and the
+ *    standard control is a change request verified out-of-band against a
+ *    known-good contact, approved by someone other than the requester.
+ *    (Not reachable here — kept off this schema deliberately.)
+ */
 export const updateSupplierBodySchema = z
   .object({
-    companyName: z.string().trim().min(1).max(200).optional(),
     contactName: z.string().trim().min(1).max(120).optional(),
     phone: z.string().trim().max(40).optional(),
-    country: z.string().trim().min(1).max(80).optional(),
-    region: z.string().trim().max(80).optional(),
-    category: z.string().trim().min(1).max(80).optional(),
-    legalName: z.string().trim().max(200).optional(),
-    regNumber: z.string().trim().max(120).optional(),
-    taxId: z.string().trim().max(120).optional(),
-    yearEstablished: z.coerce.number().int().min(1800).max(2100).optional(),
-    employees: z.coerce.number().int().min(0).max(1_000_000).optional(),
-    factoryType: z.string().trim().max(120).optional(),
-    factoryAddress: z.string().trim().max(500).optional(),
-    businessLicenseUrl: z.string().url().max(1024).optional(),
   })
   .strict();
 export type UpdateSupplierBody = z.infer<typeof updateSupplierBodySchema>;
