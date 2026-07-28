@@ -158,8 +158,33 @@ function auditData(body: SaveAuditBody | CompleteAuditBody): Prisma.SupplierAudi
 }
 
 /** PUT /:supplierId — autosave a draft. */
+/**
+ * A completed audit is a signed compliance record, not a working document.
+ *
+ * Both save and complete used a bare `upsert`, so a COMPLETED audit could be
+ * silently overwritten — new findings, a new score, a different outcome, and
+ * another `supplier.audit.complete` email to the supplier — with no trace of
+ * the original. The admin UI already treats completed audits as read-only;
+ * the API did not, which is the same client-trusting split as the PIQ editor.
+ *
+ * Correcting a genuine error should be an explicit amendment (a new revision
+ * with its own record), not an in-place rewrite. Until that exists, refuse.
+ */
+async function refuseIfCompleted(supplierId: string): Promise<void> {
+  const existing = await prisma.supplierAudit.findUnique({
+    where: { supplierId },
+    select: { status: true },
+  });
+  if (existing?.status === 'COMPLETED') {
+    throw HttpError.badRequest(
+      'This audit is complete and its report has been issued. It cannot be edited or re-run.',
+    );
+  }
+}
+
 export async function saveAudit(supplierId: string, body: SaveAuditBody) {
   await supplierOrThrow(supplierId);
+  await refuseIfCompleted(supplierId);
   const data = auditData(body);
   const a = await prisma.supplierAudit.upsert({
     where: { supplierId },
@@ -172,6 +197,7 @@ export async function saveAudit(supplierId: string, body: SaveAuditBody) {
 /** POST /:supplierId/complete — score, generate report, route onward. */
 export async function completeAudit(supplierId: string, body: CompleteAuditBody) {
   const supplier = await supplierOrThrow(supplierId);
+  await refuseIfCompleted(supplierId);
   const template = getAuditTemplate(body.category);
   if (!template) throw HttpError.badRequest('Unknown audit category.');
 

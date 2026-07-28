@@ -37,7 +37,20 @@ const issueBody = z.object({
     )
     .min(1),
   currency: z.string().trim().max(8).optional(),
-  dueDate: z.string().trim().optional(),
+  // Was an unvalidated string, so `new Date(...)` could produce an Invalid
+  // Date (a Prisma 500 rather than a clean 400) and a delivery deadline could
+  // be set in the past — a PO that is overdue the moment it is issued.
+  dueDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date in YYYY-MM-DD format.')
+    .refine((s) => !Number.isNaN(Date.parse(s)), 'That is not a real date.')
+    .refine((s) => {
+      const now = new Date();
+      const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      return Date.parse(s) >= todayUtc;
+    }, 'A delivery deadline cannot be in the past.')
+    .optional(),
   notes: z.string().trim().max(2000).optional(),
 });
 

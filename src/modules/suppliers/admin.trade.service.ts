@@ -135,6 +135,20 @@ export async function issuePurchaseOrder(
 export async function cancelPurchaseOrder(id: string) {
   const po = await prisma.purchaseOrder.findUnique({ where: { id } });
   if (!po) throw HttpError.notFound('Purchase order not found');
+
+  // A fulfilled order is history, not a workflow state. Cancelling one would
+  // say the supplier never delivered goods they have already shipped — and it
+  // silently drops out of `valueFulfilled` on their Stage-10 performance card.
+  // Raise a credit note or a return against it instead.
+  if (po.status === 'FULFILLED') {
+    throw HttpError.badRequest(
+      'This order has already been fulfilled and cannot be cancelled. Raise a return or credit note instead.',
+    );
+  }
+  if (po.status === 'CANCELLED') {
+    throw HttpError.badRequest('This order is already cancelled.');
+  }
+
   const updated = await prisma.purchaseOrder.update({ where: { id }, data: { status: 'CANCELLED' } });
   return toPublicPO(updated);
 }
