@@ -395,6 +395,22 @@ export async function completeStage(
   answers: Record<string, unknown>,
 ): Promise<PublicSupplier> {
   const profile = await profileOrThrow(userId);
+
+  // The journey is strictly sequential, and this is the only place that
+  // enforces it. `StageAccessGate` in the web app is client-side, so without
+  // this check a brand-new supplier could POST /me/stages/9/complete and land
+  // on Stage 10 — skipping the product audit and the partnership agreement
+  // entirely. Verified: that exact call used to return 200.
+  //
+  // Re-completing an earlier stage stays allowed: suppliers legitimately go
+  // back and revise Discovery or their EoI, and `nextStage` below never moves
+  // anyone backwards.
+  if (stage > profile.currentStage) {
+    throw HttpError.badRequest(
+      `You're currently at stage ${profile.currentStage}. Complete that before moving to stage ${stage}.`,
+    );
+  }
+
   const all = (profile.stageAnswers as Record<string, unknown> | null) ?? {};
   all[String(stage)] = answers;
   const nextStage = Math.min(10, Math.max(profile.currentStage, stage + 1));
@@ -455,7 +471,29 @@ export async function updatePIQ(
 
 /** POST /me/piqs/:id/submit — send for review. */
 export async function submitPIQ(userId: string, id: string): Promise<PublicPIQ> {
-  await ownedPIQ(userId, id);
+  const existing = await ownedPIQ(userId, id);
+
+  // Server-side floor on what may enter the review queue.
+  //
+  // The web form already blocks submit until every visible required question
+  // is answered — but that check is client-side, so the API accepted a
+  // completely empty PIQ (0 answers, 0% complete) and put it UNDER_REVIEW.
+  // That is how the "Autosave Test" record ended up in the real queue.
+  //
+  // The API can't do the *full* required-field check: the question schema
+  // lives in the web app, not here (a server-side `PIQConfig` model is the
+  // proper long-term fix). It can refuse the obviously-empty case, which is
+  // the one that actually pollutes reviewers' queues.
+  const answers = (existing.answers as Record<string, unknown> | null) ?? {};
+  const answered = Object.values(answers).filter(
+    (v) => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && v.length === 0),
+  );
+  if (answered.length === 0) {
+    throw HttpError.badRequest(
+      'This questionnaire is empty. Fill in your product details before submitting it for review.',
+    );
+  }
+
   const piq = await prisma.productPIQ.update({
     where: { id },
     data: { status: 'UNDER_REVIEW' },

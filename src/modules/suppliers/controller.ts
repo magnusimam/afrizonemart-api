@@ -102,8 +102,33 @@ export async function getPIQHandler(
   res.json(piq);
 }
 
+/**
+ * A proposed facility-visit date.
+ *
+ * Was `z.string().min(1)`, which accepted anything — a supplier could propose
+ * 2020-01-01 and the visits team would get a booking request for six years
+ * ago. Constrained to a real ISO date inside a sensible booking horizon:
+ * from today (a visit can't be arranged retroactively) to a year out.
+ */
+const VISIT_HORIZON_DAYS = 365;
+
 const requestVisitBody = z.object({
-  preferredDate: z.string().trim().min(1).max(120),
+  preferredDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date in YYYY-MM-DD format.')
+    .refine((s) => !Number.isNaN(Date.parse(s)), 'That is not a real date.')
+    .refine((s) => {
+      // Compare date-only, in UTC, so a visit proposed for "today" from a
+      // timezone ahead of UTC isn't rejected as being in the past.
+      const today = new Date();
+      const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+      return Date.parse(s) >= todayUtc;
+    }, 'Choose a date from today onwards.')
+    .refine(
+      (s) => Date.parse(s) <= Date.now() + VISIT_HORIZON_DAYS * 86_400_000,
+      `Choose a date within the next ${VISIT_HORIZON_DAYS} days.`,
+    ),
   address: z.string().trim().max(500).optional(),
 });
 
