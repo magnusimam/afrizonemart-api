@@ -28,7 +28,8 @@ import {
 import { getOrientation, postOrientationComment } from './orientation.service';
 import { getReviewCall, requestReschedule } from './reviewcall.service';
 import { acknowledgePO, fulfillPO, getPerformance, listPurchaseOrders } from './trade.service';
-import { uploadImage as uploadImageService } from '@/modules/uploads/service';
+import path from 'node:path';
+import { uploadImage as uploadImageService, putRaw } from '@/modules/uploads/service';
 
 const idParam = z.object({ id: z.string().min(1) });
 const stageParam = z.object({ stage: z.coerce.number().int().min(1).max(10) });
@@ -140,6 +141,42 @@ export async function uploadListingPhotoHandler(req: AuthedRequest, res: Respons
     mimeType: file.mimetype,
     size: file.size,
     folder: 'products',
+    originalName: file.originalname,
+  });
+  res.status(201).json(result);
+}
+
+/**
+ * POST /api/suppliers/me/document — a supporting document for a journey
+ * form: business licence, certification, bank letter, product photo.
+ *
+ * Unlike the listing-photo endpoint this accepts PDFs as well as images,
+ * because most compliance paperwork arrives as a PDF. Images still go
+ * through the full sniff/allowlist path; PDFs are stored via the raw
+ * passthrough, guarded by an explicit mime allowlist here and multer's
+ * size limit on the route.
+ */
+export async function uploadSupplierDocumentHandler(req: AuthedRequest, res: Response): Promise<void> {
+  if (!req.user) throw HttpError.unauthorized();
+  await getSupplierByUserId(req.user.id); // 404 if not a supplier
+  const file = (req as AuthedRequest & { file?: Express.Multer.File }).file;
+  if (!file) throw HttpError.badRequest('No file uploaded. Use multipart/form-data with a "file" field.');
+
+  if (file.mimetype === 'application/pdf') {
+    const raw = await putRaw({
+      buffer: file.buffer,
+      mimeType: file.mimetype,
+      folder: 'supplier-docs',
+    });
+    res.status(201).json({ ...raw, originalName: path.basename(file.originalname) });
+    return;
+  }
+
+  const result = await uploadImageService({
+    buffer: file.buffer,
+    mimeType: file.mimetype,
+    size: file.size,
+    folder: 'supplier-docs',
     originalName: file.originalname,
   });
   res.status(201).json(result);

@@ -17,6 +17,7 @@ import {
   postOrientationCommentHandler,
   rescheduleReviewCallHandler,
   uploadListingPhotoHandler,
+  uploadSupplierDocumentHandler,
   listPurchaseOrdersHandler,
   acknowledgePOHandler,
   fulfillPOHandler,
@@ -49,6 +50,19 @@ const photoUpload = multer({
   },
 });
 
+/**
+ * Journey-form attachments. Compliance paperwork is usually a PDF, so this
+ * allows PDFs alongside images — unlike photoUpload, which is image-only.
+ */
+const docUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: env.UPLOADS_MAX_BYTES },
+  fileFilter: (_req, file, cb: FileFilterCallback) => {
+    if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Only image or PDF uploads are allowed'));
+  },
+});
+
 /** Translate multer's cb(err) into a 400 instead of a generic 500. */
 function withUpload(handler: ReturnType<typeof photoUpload.single>) {
   return (req: Request, res: Response, next: NextFunction) =>
@@ -71,6 +85,8 @@ supplierRoutes.get('/me/visit', requireAuth, asyncHandler(getVisitHandler));
 supplierRoutes.post('/me/visit/request', requireAuth, asyncHandler(requestVisitHandler));
 supplierRoutes.get('/me/audit', requireAuth, asyncHandler(getAuditHandler));
 supplierRoutes.post('/me/listing-photo', requireAuth, withUpload(photoUpload.single('file')), asyncHandler(uploadListingPhotoHandler));
+/// Journey-form attachments: images AND PDFs (licences, certifications).
+supplierRoutes.post('/me/document', requireAuth, withUpload(docUpload.single('file')), asyncHandler(uploadSupplierDocumentHandler));
 supplierRoutes.get('/me/orientation', requireAuth, asyncHandler(getOrientationHandler));
 supplierRoutes.post('/me/orientation/comments', requireAuth, asyncHandler(postOrientationCommentHandler));
 supplierRoutes.get('/me/review-call', requireAuth, asyncHandler(getReviewCallHandler));

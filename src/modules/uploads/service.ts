@@ -43,6 +43,10 @@ const ALLOWED_FOLDERS = new Set([
   'sellers',
   'avatars',
   'audio',
+  /// Supplier compliance paperwork — business licences, certifications,
+  /// bank letters. Kept in its own prefix so it is never confused with
+  /// public catalogue imagery.
+  'supplier-docs',
   'misc',
 ]);
 
