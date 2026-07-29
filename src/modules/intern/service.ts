@@ -153,16 +153,16 @@ export async function claimFromUnassignedPool(internId: string, body: ClaimQueue
   // Unimaged-or-undersized relative to the product's own category
   // threshold — see Category.minImages (books need 1, everything else
   // needs 3 for front/back/side). Since the filter happens client-side
-  // (Prisma can't do array-length comparisons in the query), pull a
-  // wider window than `count` before filtering — otherwise a window
-  // landing on already-satisfied products (e.g. a run of books that
-  // already have their cover) could filter down to nothing even though
-  // eligible products exist further in the table. Ordered oldest-first
-  // so the oldest genuinely-incomplete products get claimed first.
+  // (Prisma can't do array-length comparisons in the query), fetch the
+  // whole unassigned pool rather than a capped window — a capped
+  // window can be entirely satisfied products (e.g. a long run of
+  // already-covered books sitting oldest-first) and filter down to
+  // zero even though eligible products exist further in the table.
+  // The unassigned pool is small (low hundreds) so this is cheap; if
+  // it ever grows large enough to matter, revisit with pagination.
   const candidates = await prisma.product.findMany({
     where: { assignedInternId: null },
     orderBy: { createdAt: 'asc' },
-    take: Math.max(body.count * 5, 100),
     select: { id: true, images: true, category: { select: { minImages: true } } },
   });
   const targetIds = candidates
