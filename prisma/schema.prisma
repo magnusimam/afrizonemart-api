@@ -232,6 +232,12 @@ model Category {
   products  Product[]
   /// Drives the mobile PDP archetype routing.
   archetype CategoryArchetype @default(FASHION)
+  /// Minimum image count the intern image-upload workflow requires
+  /// before a product counts as "done". Physical goods need front/
+  /// back/side coverage (3); a book is complete with just its cover
+  /// (1). Defaults to 3 for every category except the `books` tree,
+  /// which is seeded to 1 by the migration that added this column.
+  minImages Int               @default(3)
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 
