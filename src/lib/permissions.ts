@@ -85,6 +85,16 @@ export type Capability =
   | 'cms-pages.write'
   | 'content.write'
   | 'blog.write'
+  /// Civic Library — admin CRUD on published GovDocument rows
+  /// (create/edit/delete/publish). Distinct from `documents.submit`
+  /// (intern drafting) and `intern.review` (approve/reject), same
+  /// split as products.write / products.submit / intern.review.
+  | 'documents.write'
+  /// Civic Library — intern capability to draft + submit a government
+  /// document for review. Implicitly grants `uploads.write` (see
+  /// `effectiveCapabilities`) so an intern can upload the PDF without
+  /// needing the broader upload grant ticked separately.
+  | 'documents.submit'
   | 'placements.write'
   | 'feature-flags.write'
   | 'business-rules.write'
@@ -130,6 +140,8 @@ export const CAPABILITY_LABELS: Record<Capability, { domain: string; label: stri
   'cms-pages.write': { domain: 'Content', label: 'Edit legacy long-form CMS pages' },
   'content.write': { domain: 'Content', label: 'Edit site text + images (homepage / landing pages)' },
   'blog.write': { domain: 'Content', label: 'Write & publish blog posts' },
+  'documents.write': { domain: 'Content', label: 'Manage Civic Library documents (create / edit / delete / publish)' },
+  'documents.submit': { domain: 'Content', label: 'Submit Civic Library documents for review (intern)' },
   'placements.write': { domain: 'Content', label: 'Manage product placements' },
   'feature-flags.write': { domain: 'Content', label: 'Toggle feature flags' },
   'business-rules.write': { domain: 'Content', label: 'Edit business rules' },
@@ -189,6 +201,9 @@ export function effectiveCapabilities(
     // files to fulfill that role. Saving the admin from having to tick
     // both boxes — without it, the intern queue is dead-on-arrival.
     if (set.has('products.image-only')) set.add('uploads.write');
+    // Same rationale as products.image-only above — a Civic Library
+    // intern can't draft a submission without uploading the PDF.
+    if (set.has('documents.submit')) set.add('uploads.write');
     return set;
   }
   return new Set(ROLE_CAPABILITIES[role]);

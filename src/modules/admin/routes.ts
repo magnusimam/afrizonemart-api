@@ -28,9 +28,11 @@ import { adminCmsRoutes } from '@/modules/cms/admin.routes';
 import { adminPlacementsRoutes } from '@/modules/placements/admin.routes';
 import { adminShelfRoutes } from '@/modules/shelves/admin.routes';
 import { adminBlogRoutes } from '@/modules/blog/admin.routes';
+import { adminDocumentRoutes } from '@/modules/documents/admin.routes';
 import { adminContentRoutes } from '@/modules/content/admin.routes';
 import { adminInternRoutes } from '@/modules/intern/admin.routes';
 import { adminProductSubmissionRoutes } from '@/modules/product-submissions/admin.routes';
+import { adminDocumentSubmissionRoutes } from '@/modules/document-submissions/admin.routes';
 import { adminInternPayoutRoutes } from '@/modules/payouts/routes';
 import { adminLoyaltyRoutes } from '@/modules/loyalty/admin.routes';
 
@@ -113,6 +115,8 @@ adminRouter.use('/loyalty', requireCapability('loyalty.read'), adminLoyaltyRoute
 adminRouter.use('/business-rules', requireCapability('business-rules.write'), adminBusinessRuleRoutes);
 adminRouter.use('/pages', requireCapability('cms-pages.write'), adminCmsRoutes);
 adminRouter.use('/blog', requireCapability('blog.write'), adminBlogRoutes);
+/// Civic Library — free government document downloads (2026-07-30).
+adminRouter.use('/documents', requireCapability('documents.write'), adminDocumentRoutes);
 adminRouter.use('/content', requireCapability('content.write'), adminContentRoutes);
 // Intern queue uses its own narrow capability `products.image-only`.
 // A regular STAFF with `products.write` can also reach it (via the
@@ -125,6 +129,13 @@ adminRouter.use(
   '/product-submissions',
   requireCapability('intern.review'),
   adminProductSubmissionRoutes,
+);
+/// Civic Library document submissions review — same `intern.review`
+/// capability as image/product submission review.
+adminRouter.use(
+  '/document-submissions',
+  requireCapability('intern.review'),
+  adminDocumentSubmissionRoutes,
 );
 /// Intern payouts — gated by `payouts.write` so finance / payroll
 /// staff can settle contractor pay without needing the rest of the

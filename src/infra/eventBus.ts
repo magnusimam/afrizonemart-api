@@ -133,6 +133,17 @@ export interface EventMap {
     refereeUserId: string;
     coins: number;
   };
+  /// 2026-07-30 — Civic Library. Fires on every free-document
+  /// download (anonymous, no userId). Reserved for future subscribers
+  /// (e.g. an ops dashboard of most-downloaded documents); not
+  /// currently wired into the PostHog analytics dispatcher since
+  /// `track()` requires a real per-user distinctId this event doesn't
+  /// have. `GovDocument.downloadCount` is the source of truth today.
+  'document.downloaded': {
+    documentId: string;
+    country: string;
+    docType: string;
+  };
 }
 
 type Handler<K extends keyof EventMap> = (

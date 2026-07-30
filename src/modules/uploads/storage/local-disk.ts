@@ -17,7 +17,12 @@ export class LocalDiskStorage implements UploadStorage {
     private readonly publicUrlBase: string,
   ) {}
 
-  async put(key: string, body: Buffer, _contentType: string): Promise<PutResult> {
+  async put(
+    key: string,
+    body: Buffer,
+    _contentType: string,
+    _contentDisposition?: string,
+  ): Promise<PutResult> {
     const target = path.join(this.rootDir, key);
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, body);

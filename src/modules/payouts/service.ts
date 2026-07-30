@@ -10,11 +10,12 @@ import type { ListPayoutsQuery, PayoutWindow } from './schema';
 /// rolled in. Stamping is done in a transaction with FOR UPDATE on
 /// the candidate rows so two admins can't double-bill the same work.
 
-/// A payout covers BOTH image submissions and full-product
-/// submissions for one intern (2026-05-24, PR 1b). Both tables share
-/// the same eligibility shape: APPROVED, not yet attached to a payout,
-/// reviewedAt inside the window. The `reviewedAt` filter is the date
-/// the money became payable.
+/// A payout covers image submissions, full-product submissions, AND
+/// Civic Library document submissions for one intern (2026-05-24,
+/// extended 2026-07-30). All three tables share the same eligibility
+/// shape: APPROVED, not yet attached to a payout, reviewedAt inside
+/// the window. The `reviewedAt` filter is the date the money became
+/// payable.
 function eligibleSubmissionWhere(
   win: PayoutWindow,
 ): Prisma.ProductImageSubmissionWhereInput {
@@ -53,12 +54,31 @@ function eligibleProductSubmissionWhere(
   return where;
 }
 
+function eligibleDocumentSubmissionWhere(
+  win: PayoutWindow,
+): Prisma.DocumentSubmissionWhereInput {
+  const where: Prisma.DocumentSubmissionWhereInput = {
+    internId: win.internId,
+    status: 'APPROVED',
+    payoutId: null,
+    reviewedAt: { not: null },
+  };
+  if (win.fromDate || win.toDate) {
+    where.reviewedAt = {
+      not: null,
+      ...(win.fromDate ? { gte: win.fromDate } : {}),
+      ...(win.toDate ? { lte: win.toDate } : {}),
+    };
+  }
+  return where;
+}
+
 /// Read-only preview of what `createPayoutDraft` would attach.
 /// Returns the eligible image + product submission rows plus the
 /// combined total. Safe to call repeatedly while the admin tunes the
 /// window.
 export async function previewPayout(win: PayoutWindow) {
-  const [submissions, productSubmissions] = await Promise.all([
+  const [submissions, productSubmissions, documentSubmissions] = await Promise.all([
     prisma.productImageSubmission.findMany({
       where: eligibleSubmissionWhere(win),
       orderBy: { reviewedAt: 'asc' },
@@ -81,15 +101,29 @@ export async function previewPayout(win: PayoutWindow) {
         createdProductId: true,
       },
     }),
+    prisma.documentSubmission.findMany({
+      where: eligibleDocumentSubmissionWhere(win),
+      orderBy: { reviewedAt: 'asc' },
+      select: {
+        id: true,
+        reviewedAt: true,
+        payRate: true,
+        title: true,
+        slug: true,
+        createdDocumentId: true,
+      },
+    }),
   ]);
   const totalNgn =
     submissions.reduce((acc, s) => acc + s.payRate, 0) +
-    productSubmissions.reduce((acc, s) => acc + s.payRate, 0);
+    productSubmissions.reduce((acc, s) => acc + s.payRate, 0) +
+    documentSubmissions.reduce((acc, s) => acc + s.payRate, 0);
   return {
     submissions,
     productSubmissions,
+    documentSubmissions,
     totalNgn,
-    submissionCount: submissions.length + productSubmissions.length,
+    submissionCount: submissions.length + productSubmissions.length + documentSubmissions.length,
   };
 }
 
@@ -101,7 +135,7 @@ export async function createPayoutDraft(
   actorId: string | null,
 ) {
   return prisma.$transaction(async (tx) => {
-    const [imageCandidates, productCandidates] = await Promise.all([
+    const [imageCandidates, productCandidates, documentCandidates] = await Promise.all([
       tx.productImageSubmission.findMany({
         where: eligibleSubmissionWhere(win),
         select: { id: true, payRate: true },
@@ -110,8 +144,12 @@ export async function createPayoutDraft(
         where: eligibleProductSubmissionWhere(win),
         select: { id: true, payRate: true },
       }),
+      tx.documentSubmission.findMany({
+        where: eligibleDocumentSubmissionWhere(win),
+        select: { id: true, payRate: true },
+      }),
     ]);
-    const candidateCount = imageCandidates.length + productCandidates.length;
+    const candidateCount = imageCandidates.length + productCandidates.length + documentCandidates.length;
     if (candidateCount === 0) {
       throw HttpError.badRequest(
         'No approved, unpaid submissions match that window.',
@@ -119,7 +157,8 @@ export async function createPayoutDraft(
     }
     const totalNgn =
       imageCandidates.reduce((acc, s) => acc + s.payRate, 0) +
-      productCandidates.reduce((acc, s) => acc + s.payRate, 0);
+      productCandidates.reduce((acc, s) => acc + s.payRate, 0) +
+      documentCandidates.reduce((acc, s) => acc + s.payRate, 0);
 
     const payout = await tx.internPayout.create({
       data: {
@@ -132,10 +171,10 @@ export async function createPayoutDraft(
       },
     });
 
-    /// Stamp every candidate of BOTH types. Re-check `payoutId IS
+    /// Stamp every candidate of ALL THREE types. Re-check `payoutId IS
     /// NULL` in each WHERE so a concurrent draft on the same intern
     /// can't double-claim a row — only the first writer wins.
-    const [imageUpdated, productUpdated] = await Promise.all([
+    const [imageUpdated, productUpdated, documentUpdated] = await Promise.all([
       imageCandidates.length > 0
         ? tx.productImageSubmission.updateMany({
             where: { id: { in: imageCandidates.map((c) => c.id) }, payoutId: null },
@@ -148,13 +187,19 @@ export async function createPayoutDraft(
             data: { payoutId: payout.id },
           })
         : Promise.resolve({ count: 0 }),
+      documentCandidates.length > 0
+        ? tx.documentSubmission.updateMany({
+            where: { id: { in: documentCandidates.map((c) => c.id) }, payoutId: null },
+            data: { payoutId: payout.id },
+          })
+        : Promise.resolve({ count: 0 }),
     ]);
 
-    if (imageUpdated.count + productUpdated.count !== candidateCount) {
+    if (imageUpdated.count + productUpdated.count + documentUpdated.count !== candidateCount) {
       /// A concurrent draft beat us to some rows. Recompute the
       /// snapshot from what we actually claimed so totalNgn /
       /// submissionCount stay truthful.
-      const [refImages, refProducts] = await Promise.all([
+      const [refImages, refProducts, refDocuments] = await Promise.all([
         tx.productImageSubmission.findMany({
           where: { payoutId: payout.id },
           select: { payRate: true },
@@ -163,11 +208,16 @@ export async function createPayoutDraft(
           where: { payoutId: payout.id },
           select: { payRate: true },
         }),
+        tx.documentSubmission.findMany({
+          where: { payoutId: payout.id },
+          select: { payRate: true },
+        }),
       ]);
-      const claimed = refImages.length + refProducts.length;
+      const claimed = refImages.length + refProducts.length + refDocuments.length;
       const newTotal =
         refImages.reduce((acc, s) => acc + s.payRate, 0) +
-        refProducts.reduce((acc, s) => acc + s.payRate, 0);
+        refProducts.reduce((acc, s) => acc + s.payRate, 0) +
+        refDocuments.reduce((acc, s) => acc + s.payRate, 0);
       if (claimed === 0) {
         await tx.internPayout.delete({ where: { id: payout.id } });
         throw HttpError.conflict(
@@ -184,7 +234,7 @@ export async function createPayoutDraft(
       where: { id: payout.id },
       include: {
         intern: { select: { id: true, name: true, email: true } },
-        _count: { select: { submissions: true, productSubmissions: true } },
+        _count: { select: { submissions: true, productSubmissions: true, documentSubmissions: true } },
       },
     });
   });
@@ -213,7 +263,7 @@ export async function finalizePayout(
     },
     include: {
       intern: { select: { id: true, name: true, email: true } },
-      _count: { select: { submissions: true, productSubmissions: true } },
+      _count: { select: { submissions: true, productSubmissions: true, documentSubmissions: true } },
     },
   });
 }
@@ -232,14 +282,18 @@ export async function cancelPayoutDraft(payoutId: string) {
         'Cannot cancel a payout that has already been marked paid.',
       );
     }
-    /// Return BOTH submission types to the unpaid pool before deleting
-    /// the draft.
+    /// Return ALL THREE submission types to the unpaid pool before
+    /// deleting the draft.
     await Promise.all([
       tx.productImageSubmission.updateMany({
         where: { payoutId: payout.id },
         data: { payoutId: null },
       }),
       tx.productSubmission.updateMany({
+        where: { payoutId: payout.id },
+        data: { payoutId: null },
+      }),
+      tx.documentSubmission.updateMany({
         where: { payoutId: payout.id },
         data: { payoutId: null },
       }),
@@ -291,6 +345,17 @@ export async function getPayout(payoutId: string) {
           name: true,
           slug: true,
           createdProductId: true,
+        },
+      },
+      documentSubmissions: {
+        orderBy: { reviewedAt: 'asc' },
+        select: {
+          id: true,
+          reviewedAt: true,
+          payRate: true,
+          title: true,
+          slug: true,
+          createdDocumentId: true,
         },
       },
     },
