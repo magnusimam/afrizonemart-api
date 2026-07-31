@@ -43,7 +43,12 @@ export class R2Storage implements UploadStorage {
     });
   }
 
-  async put(key: string, body: Buffer, contentType: string): Promise<PutResult> {
+  async put(
+    key: string,
+    body: Buffer,
+    contentType: string,
+    contentDisposition?: string,
+  ): Promise<PutResult> {
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
@@ -52,6 +57,7 @@ export class R2Storage implements UploadStorage {
         ContentType: contentType,
         // 1-year browser cache; objects are immutable (cuid keys).
         CacheControl: 'public, max-age=31536000, immutable',
+        ...(contentDisposition ? { ContentDisposition: contentDisposition } : {}),
       }),
     );
     return {
