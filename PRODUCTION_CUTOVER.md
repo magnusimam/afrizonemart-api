@@ -28,21 +28,52 @@ The dev `.env` currently carries the correct orientation values (20 / 20).
 
 ---
 
-## 2. Database migration  �︎ (needs Magnus)
+## 2. Database migration  ✅ (fixed 2026-08-08)
 
-The repo's existing `prisma migrate` history has a **broken `brand_logo`
-migration** (P3006 — references `ProductImageSubmission` before it exists). A
-clean `prisma migrate deploy` will fail until Magnus fixes that migration.
+**Do not run `prisma db push` on prod.** `npx prisma migrate deploy` is now the
+correct and only command; Railway already runs it in `railway.toml`'s
+`startCommand`.
 
-Options:
-- **Preferred:** Magnus repairs the `brand_logo` migration, then
-  `npx prisma migrate deploy` on prod.
-- **Interim:** `npx prisma db push` to sync the schema without the migration
-  history (acceptable for first launch; lose migrate history guarantees).
+The history had drifted badly — several models (`User.permissions`, the `STAFF`
+role, the CMS/blog tables, `ServiceToken`, and all six supplier models) reached
+dev *and prod* through `db push` and were never captured as migrations. A
+from-scratch `migrate deploy` failed at
+`20260511150000_grant_interns_products_write`, earlier than the `brand_logo`
+problem previously recorded here. Three changes fixed it:
 
-New supplier-portal tables to expect after sync: `SupplierProfile`,
-`ProductPIQ`, `FacilityVisit`, `SupplierAudit`, `ReviewCall`,
-`OrientationComment` (+ enums).
+1. `20260505120000_add_job_title_to_user` — backfills the `STAFF` enum value and
+   `User.permissions[]` that `db push` had added invisibly.
+2. `20260505160000_brand_logo` — a hand-patch had recreated
+   `ProductImageSubmission` in its *final* shape, including `payoutId`, which
+   made `20260518120000_intern_payouts` fail with "column already exists" on a
+   fresh database. The table is now created in its true historical shape.
+3. `20260808000000_supplier_portal_cms_service_tokens` — new. Creates the 13
+   drifted tables, 8 enums, `Product.assignedInternId`, and drops the stale
+   `Order_deliveryOtp_idx`.
+
+Editing the two historical files is safe for prod: `migrate deploy` does not
+verify checksums of migrations already recorded as applied (verified
+empirically), and it will not re-run them.
+
+Every statement in the new migration is **idempotent** (`IF NOT EXISTS`, plus
+`DO $$ … EXCEPTION WHEN duplicate_object` for enums and foreign keys). This
+matters because prod already has the CMS/blog/`ServiceToken` tables but not the
+supplier ones — and `startCommand` chains with `&&`, so one "already exists"
+error would stop the API from booting at all.
+
+Verified against Postgres 3 ways: fresh database (54 historical + 1 new all
+apply, then `migrate diff` reports *No difference detected*), full re-run on an
+already-complete database (no errors), and a prod-shaped database with CMS
+present and supplier absent (creates only what's missing, ends with zero drift).
+The API was then booted against the migration-built database and the whole
+supplier journey exercised — register → apply → stage save → PIQ create →
+submit → `UNDER_REVIEW`.
+
+> Local dev note: the dev database has **no `_prisma_migrations` table at all**
+> (it was built entirely by `db push`), which is why none of this surfaced
+> sooner. It keeps working as-is. To put it on the migration history, baseline
+> it with `npx prisma migrate resolve --applied <name>` for each migration
+> rather than running `deploy` against it.
 
 ---
 

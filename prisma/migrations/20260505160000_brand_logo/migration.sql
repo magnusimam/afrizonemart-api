@@ -21,7 +21,6 @@ CREATE TABLE "ProductImageSubmission" (
     "reviewedById" TEXT,
     "reviewedAt" TIMESTAMP(3),
     "payRate" INTEGER NOT NULL DEFAULT 0,
-    "payoutId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "ProductImageSubmission_pkey" PRIMARY KEY ("id")
@@ -30,7 +29,10 @@ CREATE TABLE "ProductImageSubmission" (
 CREATE INDEX "ProductImageSubmission_internId_status_idx" ON "ProductImageSubmission"("internId", "status");
 CREATE INDEX "ProductImageSubmission_productId_idx" ON "ProductImageSubmission"("productId");
 CREATE INDEX "ProductImageSubmission_status_createdAt_idx" ON "ProductImageSubmission"("status", "createdAt");
-CREATE INDEX "ProductImageSubmission_internId_status_payoutId_idx" ON "ProductImageSubmission"("internId", "status", "payoutId");
+-- Repair (2026-08-08): "payoutId" (column + index) belongs to
+-- 20260518120000_intern_payouts. Recreating it here made that later
+-- migration fail on a fresh database with "column already exists", so the
+-- table is created in its true historical shape and intern_payouts adds it.
 
 ALTER TABLE "ProductImageSubmission" ADD CONSTRAINT "ProductImageSubmission_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "ProductImageSubmission" ADD CONSTRAINT "ProductImageSubmission_internId_fkey" FOREIGN KEY ("internId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
