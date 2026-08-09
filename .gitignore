@@ -10,3 +10,12 @@ dist/
 .vscode/
 prisma/migrations/dev.db*
 /uploads/
+
+# Supplier import data — contains supplier PII, never commit
+/data/
+
+# Large orientation video asset (host on CDN/R2 in prod)
+/video/
+
+# Internal AZM audit source docs (PII / confidential) + regen scripts
+/supplier-docx/

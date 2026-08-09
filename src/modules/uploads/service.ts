@@ -44,6 +44,10 @@ const ALLOWED_FOLDERS = new Set([
   'sellers',
   'avatars',
   'audio',
+  /// Supplier compliance paperwork — business licences, certifications,
+  /// bank letters. Kept in its own prefix so it is never confused with
+  /// public catalogue imagery.
+  'supplier-docs',
   'documents',
   'misc',
 ]);
@@ -186,6 +190,32 @@ export async function uploadAudio(input: UploadInput): Promise<UploadResult> {
     size: input.size,
     ...(input.originalName ? { originalName: path.basename(input.originalName) } : {}),
   };
+}
+
+const RAW_EXT: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/avif': 'avif',
+};
+
+/**
+ * Raw passthrough storage — re-hosts a file to the active backend WITHOUT the
+ * image sniff/allowlist/size checks. Not exposed over HTTP; used only by the
+ * Drive→R2 migration to preserve documents (PDFs), phone formats (HEIC), and
+ * oversized originals that the strict image path rejects.
+ */
+export async function putRaw(input: { buffer: Buffer; mimeType: string; folder?: string }): Promise<UploadResult> {
+  const folder = input.folder && ALLOWED_FOLDERS.has(input.folder) ? input.folder : 'misc';
+  const ext = RAW_EXT[input.mimeType] ?? ((input.mimeType.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'bin');
+  const key = `${folder}/${createId()}.${ext}`;
+  const contentType = input.mimeType || 'application/octet-stream';
+  const { url } = await storage().put(key, input.buffer, contentType);
+  return { url, key, contentType, size: input.buffer.length };
 }
 
 /**
