@@ -5,7 +5,7 @@ import { requireAuth } from '@/middleware/auth';
 import { requireCapability } from '@/middleware/require-capability';
 import { env } from '@/config/env';
 import { HttpError } from '@/middleware/error-handler';
-import { uploadAudioHandler, uploadHandler } from './controller';
+import { uploadAudioHandler, uploadDocumentHandler, uploadHandler } from './controller';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -25,6 +25,21 @@ const audioUpload = multer({
     // strict allowlist (mp3 / wav / ogg / m4a / aac).
     if (file.mimetype.startsWith('audio/')) cb(null, true);
     else cb(new Error('Only audio uploads are allowed'));
+  },
+});
+
+// Civic Library document uploads (constitutions, acts, bills,
+// policies). Scanned government PDFs run larger than product images
+// — separate, higher size ceiling than the generic image limit
+// (DOCUMENT_MAX_BYTES in service.ts is the actual enforced cap; this
+// multer limit is just an early-reject so oversized uploads don't
+// buffer fully into memory first).
+const documentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (_req, file, cb: FileFilterCallback) => {
+    if (file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Only PDF uploads are allowed'));
   },
 });
 
@@ -84,4 +99,14 @@ uploadRoutes.post(
   '/audio',
   translateMulterError(audioUpload.single('file')),
   asyncHandler(uploadAudioHandler),
+);
+
+// Civic Library PDF upload — admin/staff with uploads.write
+// (inherited above). Document-submitting interns reach this via the
+// implicit `documents.submit` → `uploads.write` grant in
+// effectiveCapabilities(), same pattern as products.image-only.
+uploadRoutes.post(
+  '/document',
+  translateMulterError(documentUpload.single('file')),
+  asyncHandler(uploadDocumentHandler),
 );

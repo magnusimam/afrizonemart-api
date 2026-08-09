@@ -85,6 +85,16 @@ export type Capability =
   | 'cms-pages.write'
   | 'content.write'
   | 'blog.write'
+  /// Civic Library — admin CRUD on published GovDocument rows
+  /// (create/edit/delete/publish). Distinct from `documents.submit`
+  /// (intern drafting) and `intern.review` (approve/reject), same
+  /// split as products.write / products.submit / intern.review.
+  | 'documents.write'
+  /// Civic Library — intern capability to draft + submit a government
+  /// document for review. Implicitly grants `uploads.write` (see
+  /// `effectiveCapabilities`) so an intern can upload the PDF without
+  /// needing the broader upload grant ticked separately.
+  | 'documents.submit'
   | 'placements.write'
   | 'feature-flags.write'
   | 'business-rules.write'
@@ -135,6 +145,8 @@ export const CAPABILITY_LABELS: Record<Capability, { domain: string; label: stri
   'cms-pages.write': { domain: 'Content', label: 'Edit legacy long-form CMS pages' },
   'content.write': { domain: 'Content', label: 'Edit site text + images (homepage / landing pages)' },
   'blog.write': { domain: 'Content', label: 'Write & publish blog posts' },
+  'documents.write': { domain: 'Content', label: 'Manage Civic Library documents (create / edit / delete / publish)' },
+  'documents.submit': { domain: 'Content', label: 'Submit Civic Library documents for review (intern)' },
   'placements.write': { domain: 'Content', label: 'Manage product placements' },
   'feature-flags.write': { domain: 'Content', label: 'Toggle feature flags' },
   'business-rules.write': { domain: 'Content', label: 'Edit business rules' },
@@ -199,6 +211,9 @@ export function effectiveCapabilities(
     // files to fulfill that role. Saving the admin from having to tick
     // both boxes — without it, the intern queue is dead-on-arrival.
     if (set.has('products.image-only')) set.add('uploads.write');
+    // Same rationale as products.image-only above — a Civic Library
+    // intern can't draft a submission without uploading the PDF.
+    if (set.has('documents.submit')) set.add('uploads.write');
     return set;
   }
   return new Set(ROLE_CAPABILITIES[role]);
@@ -211,3 +226,42 @@ export function hasCapability(
 ): boolean {
   return effectiveCapabilities(role, userPermissions).has(capability);
 }
+
+/**
+ * Named department → starter capability bundle. `User.department` is a
+ * free-text label (new departments don't need a migration), but picking
+ * one of these known names in the staff editor one-click-fills the
+ * permissions checkbox matrix with a sensible starting set — still
+ * hand-editable afterward, and re-saving never re-applies the preset
+ * silently. Deliberately excludes `staff.manage`, `settings.write`,
+ * `payment-gateways.write`, `webhooks.write` — those stay opt-in per
+ * person, not bundled into a department.
+ */
+export const DEPARTMENT_PRESETS: Record<string, Capability[]> = {
+  Marketing: [
+    'content.write',
+    'blog.write',
+    'placements.write',
+    'cms-pages.write',
+    'coupons.write',
+    'analytics.read',
+  ],
+  Finance: ['orders.read', 'orders.refund', 'payouts.write', 'reports.read', 'loyalty.read'],
+  Operations: [
+    'products.read',
+    'products.write',
+    'categories.write',
+    'orders.write',
+    'shipping.write',
+    'intern.review',
+    'reports.read',
+  ],
+  Communications: [
+    'notifications.write',
+    'email-templates.write',
+    'reviews.moderate',
+    'customers.read',
+  ],
+};
+
+export const DEPARTMENT_NAMES = Object.keys(DEPARTMENT_PRESETS);

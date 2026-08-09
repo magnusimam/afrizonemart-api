@@ -6,14 +6,28 @@ export const createStaffBodySchema = z
     email: z.string().email().toLowerCase().trim(),
     name: z.string().trim().min(1).max(120).optional(),
     role: z.enum(['SELLER', 'ADMIN', 'STAFF']),
-    password: z.string().min(8).max(128),
+    /// Required for a brand-new account; optional when promoting an
+    /// existing customer (they already have a login). The service
+    /// enforces "required for new" — see createStaff.
+    password: z.string().min(8).max(128).optional(),
     /// Free-form job title — what the admin types in the dialog
     /// ("Intern", "Customer Support Lead", etc.). Cosmetic; does NOT
     /// grant access. Permissions still drive what they can do.
     jobTitle: z.string().trim().min(1).max(80).optional(),
+    /// Structured department label (e.g. "Marketing"). Free text so a
+    /// new department doesn't need a migration; known names in
+    /// DEPARTMENT_PRESETS drive the one-click preset in the staff
+    /// editor. Cosmetic + preset-trigger only — does NOT itself grant
+    /// access.
+    department: z.string().trim().min(1).max(60).optional(),
     /// Used when role=STAFF — the per-user capability grants. Ignored
     /// for SELLER and ADMIN (those use their role-default capabilities).
     permissions: z.array(z.enum(ALL_CAPABILITIES as [string, ...string[]])).optional(),
+    /// Explicit confirm to promote an EXISTING customer in place
+    /// (keeps their account, orders + login; just elevates role +
+    /// permissions). Without it, an existing-customer email returns a
+    /// CUSTOMER_EXISTS 409 so the UI can ask first.
+    promoteExisting: z.boolean().optional(),
   })
   .refine(
     (v) => v.role !== 'STAFF' || (v.permissions && v.permissions.length > 0),
@@ -31,6 +45,8 @@ export const updateStaffBodySchema = z.object({
   permissions: z.array(z.enum(ALL_CAPABILITIES as [string, ...string[]])).optional(),
   /// Pass null to clear the title; pass a string to update; omit to leave alone.
   jobTitle: z.string().trim().min(1).max(80).nullable().optional(),
+  /// Pass null to clear the department; pass a string to update; omit to leave alone.
+  department: z.string().trim().min(1).max(60).nullable().optional(),
   /// Optional password reset by the admin. Setting null/undefined leaves
   /// the existing hash in place.
   password: z.string().min(8).max(128).optional(),

@@ -126,4 +126,11 @@ export const FEATURE_FLAG_REGISTRY: FeatureFlagDef[] = [
       'Reserved for the kebab menu in the Grocery PDP hero. Default ON. Flip OFF if the share/report flow it opens regresses.',
     defaultValue: true,
   },
+  {
+    key: 'civic_library_enabled',
+    name: 'Civic Library',
+    description:
+      'Shows the free government-document download section (/library) and its nav entry — constitutions, acts, bills, and policies per African country, Download button instead of Add-to-Cart, no login required. Default OFF until the pilot batch of documents (Nigeria/Kenya/Ghana/South Africa constitutions) is sourced and reviewed. Flip ON once the intern-submission pipeline has published real content — an empty grid would look broken.',
+    defaultValue: false,
+  },
 ];

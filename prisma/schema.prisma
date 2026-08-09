@@ -48,6 +48,13 @@ model User {
   /// permissions array drives what they can do. Surfaced in the admin
   /// staff list and on the staff member's dashboard greeting.
   jobTitle         String?
+  /// Structured department label for STAFF accounts (e.g. "Marketing",
+  /// "Finance"). Free-text so new departments don't need a migration,
+  /// but the known set in src/lib/permissions.ts (DEPARTMENT_PRESETS)
+  /// drives a one-click capability bundle in the staff editor. Purely
+  /// a label + preset trigger — does NOT itself grant access; the
+  /// permissions array is still what's checked at request time.
+  department       String?
   // Refresh tokens are hashed before storage so a DB leak doesn't grant
   // session access. Null when the user has logged out everywhere.
   refreshTokenHash String?
@@ -123,6 +130,10 @@ model User {
   productSubmissions      ProductSubmission[]      @relation("ProductSubmissionAuthor")
   /// Full-product submissions this user has reviewed (reviewer role).
   reviewedProductSubmissions ProductSubmission[]   @relation("ProductSubmissionReviewer")
+  /// Civic Library document submissions this user has drafted (intern role).
+  documentSubmissions      DocumentSubmission[]     @relation("DocumentSubmissionAuthor")
+  /// Civic Library document submissions this user has reviewed (reviewer role).
+  reviewedDocumentSubmissions DocumentSubmission[]  @relation("DocumentSubmissionReviewer")
   /// Saved delivery addresses. The first one a customer creates is
   /// implicitly default; subsequent edits to `isDefault` are exclusive
   /// (only one address per user can be default at a time — enforced
@@ -229,6 +240,12 @@ model Category {
   products  Product[]
   /// Drives the mobile PDP archetype routing.
   archetype CategoryArchetype @default(FASHION)
+  /// Minimum image count the intern image-upload workflow requires
+  /// before a product counts as "done". Physical goods need front/
+  /// back/side coverage (3); a book is complete with just its cover
+  /// (1). Defaults to 3 for every category except the `books` tree,
+  /// which is seeded to 1 by the migration that added this column.
+  minImages Int               @default(3)
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 
@@ -249,6 +266,12 @@ model Product {
   comparePrice     Int?
   discountPercent  Int?
   origin           String? // 2-letter ISO country code, e.g. "NG", "KE"
+  /// Countries this product can be sold/shipped to, ISO-2 codes from the
+  /// canonical 54-country list (afrizonemart-v2/src/lib/countries.ts).
+  /// Empty array = sellable everywhere (default). `origin` is always
+  /// implicitly sellable even if not listed here — enforced at the
+  /// read/check site, not by mutating this array.
+  sellableCountries String[] @default([])
   /// Phase 11 — shipping weight in kilograms. Used by the shipping
   /// quote algorithm to pick the right weight bracket. Nullable so
   /// existing rows don't break; the quote engine treats null as
@@ -1844,6 +1867,10 @@ model InternPayout {
   /// A payout can cover both image work and product work for one
   /// intern in the same payday.
   productSubmissions ProductSubmission[]
+  /// Civic Library document submissions rolled into this payout
+  /// (2026-07-30). A payout can cover image, product, and document
+  /// work for one intern in the same payday.
+  documentSubmissions DocumentSubmission[]
 
   @@index([internId, paidAt])
   @@index([paidAt])
@@ -2516,4 +2543,101 @@ model ServiceToken {
   updatedAt  DateTime  @updatedAt
 
   @@index([revokedAt])
+}
+
+// ------------------------------------------------------------------
+// Civic Library — free government document downloads (2026-07-30)
+//
+// Public, unauthenticated download of official government documents
+// (constitutions, acts, bills, policies) per African country. Product-
+// card visuals on the storefront, Download button instead of Add-to-
+// Cart, no price/cart/login. Sourced via the same intern review→
+// publish pipeline as full product submissions (DocumentSubmission
+// below), reusing `ImageSubmissionStatus` rather than adding a new
+// status enum.
+// ------------------------------------------------------------------
+
+enum DocumentType {
+  CONSTITUTION
+  ACT
+  BILL
+  POLICY
+  REGULATION
+  TREATY
+}
+
+enum DocumentStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model GovDocument {
+  id                String         @id @default(cuid())
+  slug              String         @unique
+  title             String
+  /// 2-letter ISO country code — same convention as Product.origin.
+  country           String
+  docType           DocumentType
+  description       String?        @db.Text
+  /// Who published it (e.g. "National Assembly of Nigeria").
+  issuingBody       String?
+  /// Link back to the government's own publication of this document —
+  /// lets a visitor verify currency/authenticity against the source.
+  officialSourceUrl String?
+  publishedDate     DateTime?
+  fileUrl           String
+  fileSizeBytes     Int?
+  status            DocumentStatus @default(DRAFT)
+  /// Denormalized download counter, incremented via trackDownload().
+  downloadCount     Int            @default(0)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([country])
+  @@index([docType])
+  @@index([status])
+}
+
+model DocumentSubmission {
+  id              String                @id @default(cuid())
+  internId        String
+  intern          User                  @relation("DocumentSubmissionAuthor", fields: [internId], references: [id], onDelete: Cascade)
+  status          ImageSubmissionStatus @default(PENDING_REVIEW)
+
+  // --- Staged document fields (become the live GovDocument on approval) ---
+  title             String
+  /// Intern-supplied or auto-slugified at submit time, same convention
+  /// as ProductSubmission — uniqueness enforced on the real GovDocument
+  /// at approval, not here.
+  slug              String
+  country           String
+  docType           DocumentType
+  description       String?
+  issuingBody       String?
+  officialSourceUrl String?
+  publishedDate     DateTime?
+  fileUrl           String
+  fileSizeBytes     Int?
+
+  /// Filled when REJECTED so the intern sees what to fix.
+  rejectionReason String?
+  reviewedById    String?
+  reviewedBy      User?                 @relation("DocumentSubmissionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+  /// The live GovDocument created when this submission was approved.
+  /// Null while pending/rejected. Plain id (no FK) — audit trail only.
+  createdDocumentId String?
+
+  /// Pay rate snapshot in NGN at submit time — same flat-rate pattern
+  /// as image/product submissions. Consumed by the payout flow.
+  payRate         Int                   @default(0)
+  payoutId        String?
+  payout          InternPayout?         @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@index([internId, status])
+  @@index([status, createdAt])
+  @@index([internId, status, payoutId])
 }

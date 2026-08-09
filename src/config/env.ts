@@ -118,6 +118,27 @@ const envSchema = z.object({
   /// supported but #1 use case is "send to Magnus's WhatsApp".
   ORDER_NOTIFY_WHATSAPP_TO: z.string().optional(),
 
+  /// Telegram admin order-alert pipeline (2026-07-13). Interim
+  /// channel while WhatsApp is blocked on Meta verification. When
+  /// TELEGRAM_BOT_TOKEN is set the real Bot API provider is selected;
+  /// otherwise the ConsoleTelegramProvider logs to stdout (dev mode).
+  /// Token comes from @BotFather, looks like "123456789:AA...".
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  /// Comma-separated Telegram chat ids the alerts fan out to. A DM to
+  /// Magnus is his numeric user id; a group is the negative group id.
+  /// Empty / unset → dispatcher no-ops cleanly. See the
+  /// [[telegram-order-alerts]] memory for how to obtain a chat id.
+  /// Doubles as the allow-list for inbound bot commands — only these
+  /// chats get real order data back from /today, /recent, etc.
+  ORDER_NOTIFY_TELEGRAM_CHAT_ID: z.string().optional(),
+  /// Shared secret for the inbound Telegram webhook. Passed to
+  /// setWebhook as `secret_token`; Telegram echoes it back in the
+  /// `X-Telegram-Bot-Api-Secret-Token` header on every update, and
+  /// `/api/telegram/webhook` rejects any request that doesn't match.
+  /// When unset the webhook route 503s (interactive commands off);
+  /// outbound alerts are unaffected.
+  TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
+
   /// Mobile app version gate — `GET /api/app/version-gate` reads
   /// these on every call so we can flip them via Railway env
   /// without a code deploy when a critical bug ships. Format:
@@ -147,6 +168,10 @@ const envSchema = z.object({
   // button is enabled. The same client id is exposed on the frontend
   // via NEXT_PUBLIC_GOOGLE_CLIENT_ID.
   GOOGLE_CLIENT_ID: z.string().optional(),
+  // Optional second client ID for the mobile app (Desktop app type in
+  // Google Cloud Console). When set, the API accepts tokens from both
+  // the web client and the mobile client.
+  GOOGLE_MOBILE_CLIENT_ID: z.string().optional(),
 
   // Twilio Verify — phone/SMS auth. When all three are set, the
   // /api/auth/phone/* endpoints are functional. Without them they

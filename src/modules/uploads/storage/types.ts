@@ -13,8 +13,19 @@ export interface PutResult {
 }
 
 export interface UploadStorage {
-  /** Persist a buffer under the given key and return the publicly-accessible URL. */
-  put(key: string, body: Buffer, contentType: string): Promise<PutResult>;
+  /**
+   * Persist a buffer under the given key and return the publicly-
+   * accessible URL. `contentDisposition` is optional — set it to
+   * `attachment; filename="..."` so a plain `<a href>` reliably
+   * force-downloads instead of navigating inline (browsers don't
+   * consistently honor the `download` attribute cross-origin).
+   */
+  put(
+    key: string,
+    body: Buffer,
+    contentType: string,
+    contentDisposition?: string,
+  ): Promise<PutResult>;
 
   /** Remove a previously-stored object. No-op if it doesn't exist. */
   delete(key: string): Promise<void>;

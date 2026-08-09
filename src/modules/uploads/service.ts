@@ -10,6 +10,7 @@ import { R2Storage } from './storage/r2';
 import type { UploadStorage } from './storage/types';
 import { sniffImageMime } from './sniff';
 import { sniffAudioMime } from './sniff-audio';
+import { sniffPdfMime } from './sniff-pdf';
 
 const ALLOWED_MIME = new Set([
   'image/jpeg',
@@ -47,8 +48,27 @@ const ALLOWED_FOLDERS = new Set([
   /// bank letters. Kept in its own prefix so it is never confused with
   /// public catalogue imagery.
   'supplier-docs',
+  'documents',
   'misc',
 ]);
+
+/// Government document PDFs (constitutions, acts, bills, policies) can
+/// legitimately be much larger than the image/audio uploads elsewhere
+/// in this module (scanned gazettes especially). Separate ceiling so
+/// raising it doesn't also loosen the image upload limit.
+const DOCUMENT_MAX_BYTES = 50 * 1024 * 1024; // 50MB
+
+/// Filesystem-safe filename for the Content-Disposition header —
+/// strips anything that isn't a letter/digit/hyphen so it survives
+/// header encoding without escaping gymnastics.
+function safeFilename(hint: string | undefined, fallback: string): string {
+  const base = (hint ?? fallback)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100);
+  return `${base || fallback}.pdf`;
+}
 
 let storageInstance: UploadStorage | null = null;
 function storage(): UploadStorage {
@@ -196,6 +216,46 @@ export async function putRaw(input: { buffer: Buffer; mimeType: string; folder?:
   const contentType = input.mimeType || 'application/octet-stream';
   const { url } = await storage().put(key, input.buffer, contentType);
   return { url, key, contentType, size: input.buffer.length };
+}
+
+/**
+ * PDF sibling of `uploadImage`/`uploadAudio` — powers Civic Library
+ * document submissions. Same security posture: sniff the magic
+ * bytes, never trust the client header, store under the `documents/`
+ * prefix. Sets `Content-Disposition: attachment` at upload time so a
+ * plain `<a href={fileUrl} download>` on the storefront reliably
+ * force-downloads the file instead of a browser opening it inline
+ * (cross-origin `download` attributes aren't consistently honored).
+ */
+export async function uploadDocument(input: UploadInput): Promise<UploadResult> {
+  if (input.size > DOCUMENT_MAX_BYTES) {
+    throw HttpError.badRequest(
+      `File too large (${input.size} bytes). Max ${DOCUMENT_MAX_BYTES} bytes.`,
+    );
+  }
+
+  const sniffed = sniffPdfMime(input.buffer);
+  if (!sniffed) {
+    throw HttpError.badRequest('File contents are not a recognised PDF.');
+  }
+
+  const key = `documents/${createId()}.pdf`;
+  const filename = safeFilename(input.originalName?.replace(/\.pdf$/i, ''), key.split('/')[1]);
+
+  const { url } = await storage().put(
+    key,
+    input.buffer,
+    sniffed,
+    `attachment; filename="${filename}"`,
+  );
+
+  return {
+    url,
+    key,
+    contentType: sniffed,
+    size: input.size,
+    ...(input.originalName ? { originalName: path.basename(input.originalName) } : {}),
+  };
 }
 
 export function deleteImage(key: string): Promise<void> {

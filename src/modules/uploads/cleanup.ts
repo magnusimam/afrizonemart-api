@@ -29,7 +29,7 @@ import { deleteImage } from './service';
 
 /// The folder allowlist mirrors `service.ts:ALLOWED_FOLDERS`. We
 /// extract the suffix `/<folder>/<filename>` from the URL.
-const KEY_PATTERN = /\/(products|categories|about|reviews|sellers|misc)\/([^/?#]+)$/;
+const KEY_PATTERN = /\/(products|categories|about|reviews|sellers|documents|misc)\/([^/?#]+)$/;
 
 /// Convert a public image URL to the underlying storage key, or null
 /// if the URL doesn't look like one of ours. Tolerant of differences

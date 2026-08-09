@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { HttpError } from '@/middleware/error-handler';
-import { uploadAudio, uploadImage } from './service';
+import { uploadAudio, uploadDocument, uploadImage } from './service';
 
 export async function uploadHandler(req: Request, res: Response): Promise<void> {
   // multer puts the parsed file at req.file.
@@ -29,6 +29,22 @@ export async function uploadAudioHandler(req: Request, res: Response): Promise<v
   }
 
   const result = await uploadAudio({
+    buffer: file.buffer,
+    mimeType: file.mimetype,
+    size: file.size,
+    originalName: file.originalname,
+  });
+
+  res.status(201).json(result);
+}
+
+export async function uploadDocumentHandler(req: Request, res: Response): Promise<void> {
+  const file = (req as Request & { file?: Express.Multer.File }).file;
+  if (!file) {
+    throw HttpError.badRequest('No file uploaded. Use multipart/form-data with a "file" field.');
+  }
+
+  const result = await uploadDocument({
     buffer: file.buffer,
     mimeType: file.mimetype,
     size: file.size,

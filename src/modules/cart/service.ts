@@ -25,6 +25,7 @@ export interface CartLine {
   comparePrice: number | null;
   image: string | null;
   origin: string | null;
+  sellableCountries: string[];
   quantity: number;
   lineTotal: number;
   inStock: boolean;
@@ -57,6 +58,7 @@ function shape(cart: LoadedCart | null): CartView {
     comparePrice: i.productVariant.comparePriceNgn,
     image: i.product.images[0] ?? null,
     origin: i.product.origin,
+    sellableCountries: i.product.sellableCountries,
     quantity: i.quantity,
     lineTotal: i.productVariant.priceNgn * i.quantity,
     inStock: i.product.inStock && i.productVariant.inStock,

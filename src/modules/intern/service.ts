@@ -150,18 +150,25 @@ export async function getInternQueue(internId: string) {
  * assignedInternId === null in the update.
  */
 export async function claimFromUnassignedPool(internId: string, body: ClaimQueueBody) {
+  // Unimaged-or-undersized relative to the product's own category
+  // threshold — see Category.minImages (books need 1, everything else
+  // needs 3 for front/back/side). Since the filter happens client-side
+  // (Prisma can't do array-length comparisons in the query), fetch the
+  // whole unassigned pool rather than a capped window — a capped
+  // window can be entirely satisfied products (e.g. a long run of
+  // already-covered books sitting oldest-first) and filter down to
+  // zero even though eligible products exist further in the table.
+  // The unassigned pool is small (low hundreds) so this is cheap; if
+  // it ever grows large enough to matter, revisit with pagination.
   const candidates = await prisma.product.findMany({
-    where: {
-      assignedInternId: null,
-      // Unimaged-or-undersized: < 3 images means the product needs
-      // the front/back/side workflow.
-    },
-    take: body.count,
-    select: { id: true, images: true },
+    where: { assignedInternId: null },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, images: true, category: { select: { minImages: true } } },
   });
-  // Filter client-side rather than Postgres because Prisma doesn't
-  // expose array-length filtering cleanly. The `take` window is small.
-  const targetIds = candidates.filter((p) => p.images.length < 3).map((p) => p.id);
+  const targetIds = candidates
+    .filter((p) => p.images.length < (p.category?.minImages ?? 3))
+    .slice(0, body.count)
+    .map((p) => p.id);
   if (targetIds.length === 0) return { claimed: 0 };
 
   // updateMany with both `assignedInternId: null` AND `id IN (...)`
@@ -427,10 +434,12 @@ export async function bulkAssign(body: BulkAssignBody) {
   const candidates = await prisma.product.findMany({
     where: { assignedInternId: null },
     orderBy: { createdAt: 'asc' },
-    select: { id: true, images: true },
+    select: { id: true, images: true, category: { select: { minImages: true } } },
   });
   const filtered = candidates
-    .filter((p) => (body.scope === 'all-unassigned' ? true : p.images.length < 3))
+    .filter((p) =>
+      body.scope === 'all-unassigned' ? true : p.images.length < (p.category?.minImages ?? 3),
+    )
     .map((p) => p.id);
 
   if (filtered.length === 0) return { assigned: 0, perIntern: {} };

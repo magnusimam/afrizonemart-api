@@ -28,18 +28,20 @@
 
 ## Subscribers (what fires when)
 
-| Event | Notifications | Loyalty | Webhooks (outbound) | WhatsApp (admin alert) | Push (mobile) |
-|---|---|---|---|---|---|
-| `order.placed` | **only** for BANK_TRANSFER / CASH_ON_DELIVERY: `OrderAwaitingPayment` email. **No email for online methods** — they wait for `order.paid`. | — | yes (dispatched to admin-configured webhook subscribers) | — | — |
-| `order.paid` | `OrderConfirmed` + `PaymentReceived` emails | `awardCoinsForPaidOrder` — coin earn + tier check + welcome bonus | yes | yes — `new_order_alert` template sent to every number in `ORDER_NOTIFY_WHATSAPP_TO` via Meta WhatsApp Cloud API (`whatsapp-dispatcher.ts`). Silently no-ops when env not set. | yes — "Payment received" to every registered push token for the customer (`push-dispatcher.ts`). |
-| `payment.failed` | `PaymentFailed` email (with gateway reason if any) | — | yes | — | yes — "Payment failed" |
-| `order.shipped` | `OrderShipped` email | — | yes | — | yes — "On the way" |
-| `order.out_for_delivery` | — (no email today) | — | yes | — | yes — "Out for delivery — open the app when the rider arrives" |
-| `order.delivered` | `OrderDelivered` email — **skipped when `source: 'auto'`** so 14-day-backstop customers don't get a confused "your order arrived" email | — | yes | — | yes — "Delivered" — **skipped when `source: 'auto'`** |
-| `order.review_nudge_due` | — | — | — | — | yes — "How was your order? Tap to rate the items in order #...". Deep links to OrderDetail; the customer's "Rate this order" CTA there opens the bulk-review flow. |
-| `order.cancelled` | `OrderCancelled` email | — | yes | — | yes — "Order cancelled" |
-| `order.refunded` | `RefundIssued` email | `clawbackOnRefund` — REDEEM_REFUND always, REVERSAL on full refund | yes | — | — |
-| `order.note_added` | only if `isCustomerVisible: true`: planned future email (not wired) | — | yes |
+| Event | Notifications | Loyalty | Webhooks (outbound) | WhatsApp (admin alert) | Telegram (admin alert) | Push (mobile) |
+|---|---|---|---|---|---|---|
+| `order.placed` | **only** for BANK_TRANSFER / CASH_ON_DELIVERY: `OrderAwaitingPayment` email. **No email for online methods** — they wait for `order.paid`. | — | yes (dispatched to admin-configured webhook subscribers) | — | yes — "🆕 New order — awaiting payment" | — |
+| `order.paid` | `OrderConfirmed` + `PaymentReceived` emails | `awardCoinsForPaidOrder` — coin earn + tier check + welcome bonus | yes | yes — `new_order_alert` template sent to every number in `ORDER_NOTIFY_WHATSAPP_TO` via Meta WhatsApp Cloud API (`whatsapp-dispatcher.ts`). Silently no-ops when env not set. | yes — "✅ Payment received" | yes — "Payment received" to every registered push token for the customer (`push-dispatcher.ts`). |
+| `payment.failed` | `PaymentFailed` email (with gateway reason if any) | — | yes | — | yes — "❌ Payment FAILED" (+ gateway reason) | yes — "Payment failed" |
+| `order.shipped` | `OrderShipped` email | — | yes | — | yes — "📦 Order shipped" | yes — "On the way" |
+| `order.out_for_delivery` | — (no email today) | — | yes | — | yes — "🚚 Out for delivery" | yes — "Out for delivery — open the app when the rider arrives" |
+| `order.delivered` | `OrderDelivered` email — **skipped when `source: 'auto'`** so 14-day-backstop customers don't get a confused "your order arrived" email | — | yes | — | yes — "🎉 Order delivered" | yes — "Delivered" — **skipped when `source: 'auto'`** |
+| `order.review_nudge_due` | — | — | — | — | — | yes — "How was your order? Tap to rate the items in order #...". Deep links to OrderDetail; the customer's "Rate this order" CTA there opens the bulk-review flow. |
+| `order.cancelled` | `OrderCancelled` email | — | yes | — | yes — "🚫 Order cancelled" | yes — "Order cancelled" |
+| `order.refunded` | `RefundIssued` email | `clawbackOnRefund` — REDEEM_REFUND always, REVERSAL on full refund | yes | — | yes — "💸 Order refunded" | — |
+| `order.note_added` | only if `isCustomerVisible: true`: planned future email (not wired) | — | yes | — | — | — |
+
+> **Telegram admin alerts (`telegram-dispatcher.ts`, 2026-07-13):** interim admin-alert channel while WhatsApp is blocked on Meta Business verification. Subscribes to the **whole** order lifecycle (every "yes" above), fanning a rich HTML summary out to every chat id in `ORDER_NOTIFY_TELEGRAM_CHAT_ID`. No template approval or per-message cost — needs only `TELEGRAM_BOT_TOKEN`. No-ops cleanly when either env is unset. Unlike WhatsApp (paid only), Telegram deliberately covers pending + failed too, per the "tell me about any order, any form" ask.
 
 ## Why this design has no holes
 

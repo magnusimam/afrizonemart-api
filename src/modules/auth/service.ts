@@ -55,6 +55,9 @@ export interface PublicUser {
   /// the auth store has them available for any client-side gating.
   marketingOptIn: boolean;
   smsOptIn: boolean;
+  /// Afrizonemart Wrap opt-out. Surfaced so /account/profile renders
+  /// the toggle's current state.
+  wrapOptOut: boolean;
   /// 2026-05-16 Phase 2 — ISO yyyy-mm-dd (UTC) or null.
   birthDate: string | null;
   createdAt: string;
@@ -86,6 +89,7 @@ function toPublic(user: User): PublicUser {
     permissions,
     marketingOptIn: user.marketingOptIn,
     smsOptIn: user.smsOptIn,
+    wrapOptOut: user.wrapOptOut,
     birthDate: user.birthDate ? user.birthDate.toISOString().slice(0, 10) : null,
     createdAt: user.createdAt.toISOString(),
   };
@@ -275,6 +279,7 @@ export async function updateMe(
       ...(body.phone !== undefined && { phone: body.phone }),
       ...(body.marketingOptIn !== undefined && { marketingOptIn: body.marketingOptIn }),
       ...(body.smsOptIn !== undefined && { smsOptIn: body.smsOptIn }),
+      ...(body.wrapOptOut !== undefined && { wrapOptOut: body.wrapOptOut }),
       ...(body.birthDate !== undefined && {
         birthDate: body.birthDate
           ? new Date(`${body.birthDate}T00:00:00.000Z`)

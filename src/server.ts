@@ -32,6 +32,7 @@ import { fxRoutes } from '@/modules/fx/routes';
 import { categoryRoutes } from '@/modules/categories/routes';
 import { shelfRoutes } from '@/modules/shelves/routes';
 import { wrapRoutes } from '@/modules/wrap/routes';
+import { telegramRoutes } from '@/modules/telegram/routes';
 import { wishlistRoutes } from '@/modules/wishlist/routes';
 import { reviewRoutes } from '@/modules/reviews/routes';
 import { viewRoutes } from '@/modules/views/routes';
@@ -43,16 +44,19 @@ import { startLoyaltyMaintenanceCron } from '@/modules/loyalty/cron';
 import { seedDefaultShelves } from '@/modules/shelves/service';
 import { seedRegisteredFlags } from '@/modules/feature-flags/service';
 import { blogRoutes } from '@/modules/blog/routes';
+import { documentRoutes } from '@/modules/documents/routes';
 import { contentRoutes } from '@/modules/content/routes';
 import { internRoutes } from '@/modules/intern/routes';
 import { productSubmissionRoutes } from '@/modules/product-submissions/routes';
 import { supplierRoutes } from '@/modules/suppliers/routes';
 import { orientationPublicRoutes } from '@/modules/suppliers/orientation.public.routes';
 import { billieRoutes } from '@/modules/billie/routes';
+import { documentSubmissionRoutes } from '@/modules/document-submissions/routes';
 import { startScheduledBlogCron } from '@/modules/blog/cron';
 import { startWebhookDispatcher } from '@/modules/webhooks/dispatcher';
 import { startNotificationDispatcher } from '@/modules/notifications/dispatcher';
 import { startWhatsAppDispatcher } from '@/modules/notifications/whatsapp-dispatcher';
+import { startTelegramDispatcher } from '@/modules/notifications/telegram-dispatcher';
 import { startPushDispatcher } from '@/modules/notifications/push-dispatcher';
 import { startCourierAutoMarkCron } from '@/modules/courier/auto-mark-cron';
 import { startReviewNudgeCron } from '@/modules/reviews/review-nudge-cron';
@@ -240,11 +244,13 @@ app.use('/api/custom-fields', customFieldRoutes);
 app.use('/api/flags', featureFlagRoutes);
 app.use('/api/pages', cmsRoutes);
 app.use('/api/blog', blogRoutes);
+app.use('/api/documents', documentRoutes);
 app.use('/api/content', contentRoutes);
 /// Mount BEFORE /api/intern — the latter's catch-all gate is
 /// products.image-only, which would 403 a product.submit-only intern
 /// before this more-specific router runs. Express matches in order.
 app.use('/api/intern/product-submissions', productSubmissionRoutes);
+app.use('/api/intern/document-submissions', documentSubmissionRoutes);
 app.use('/api/intern', internRoutes);
 app.use('/api/fx', fxRoutes);
 app.use('/api/suppliers', supplierRoutes);
@@ -254,6 +260,7 @@ app.use('/api/billie', billieRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/shelves', shelfRoutes);
 app.use('/api/wrap', wrapRoutes);
+app.use('/api/telegram', telegramRoutes);
 app.use('/api/admin', adminRouter);
 
 // Terminal handlers
@@ -298,6 +305,7 @@ async function start() {
   startWebhookDispatcher();
   startNotificationDispatcher();
   startWhatsAppDispatcher();
+  startTelegramDispatcher();
   startPushDispatcher();
   startCourierAutoMarkCron();
   startReviewNudgeCron();
