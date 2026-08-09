@@ -2463,6 +2463,30 @@ model ProductPIQ {
   @@index([status])
 }
 
+/// Human-readable catalogue of PIQ questions, mirrored from `piq-config.ts`
+/// in afrizonemart-v2 by its `scripts/gen-piq-catalog.mjs`.
+///
+/// `ProductPIQ.answers` is keyed by field id, so on its own the database
+/// holds answers it cannot label — `shelf_life` means nothing to SQL. This
+/// table is what the `v_piq_answer` view joins against so anything pointed at
+/// Postgres (Beekeeper, Metabase, a CSV export) reads real question text.
+///
+/// Nothing in the API writes to it; the app still reads the TypeScript config.
+/// Rows for questions since removed from the config are kept deliberately —
+/// old PIQs still hold answers keyed by them.
+model PIQQuestion {
+  id           String  @id
+  section      String
+  sectionTitle String
+  label        String
+  type         String
+  required     Boolean @default(false)
+  /// Global ordering across all sections, 1-based.
+  position     Int
+
+  @@index([section, position])
+}
+
 /// A long-lived, revocable bearer credential for a machine consumer of the
 /// API (e.g. the B.I.L.L.I.E. voice assistant). Deliberately NOT a user
 /// login: no password, no refresh cookie, no session — just a hashed secret

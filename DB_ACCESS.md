@@ -92,9 +92,10 @@ ORDER BY s."companyName";
 Read one product's questionnaire answers as readable rows:
 
 ```sql
-SELECT key AS question_id, value AS answer
-FROM "ProductPIQ", jsonb_each_text(answers::jsonb)
-WHERE "ProductPIQ".id = 'paste-a-piq-id-here';
+SELECT section, question, answer
+FROM v_piq_answer
+WHERE piq_id = 'paste-a-piq-id-here'
+ORDER BY question_position;
 ```
 
 What's waiting on a review:
@@ -107,6 +108,72 @@ WHERE p.status IN ('SUBMITTED', 'UNDER_REVIEW')
 ORDER BY p."updatedAt" DESC;
 ```
 
-The JSON columns (`answers`, `eoiAnswers`, `stageAnswers`) are keyed by form
-field ids like `product_name` or `shelf_life`. Beekeeper renders them as JSON —
-click a cell to expand it.
+## Don't read the JSON columns directly — use the views
+
+`answers`, `eoiAnswers` and `stageAnswers` are JSONB keyed by form field id
+(`product_name`, `shelf_life`). Beekeeper shows each as one opaque cell, and the
+field ids are only documented in TypeScript. Two views unpack them:
+
+| View | One row per | Use it for |
+|---|---|---|
+| `v_piq_answer` | answered PIQ question | Everything about products |
+| `v_supplier_answer` | answered EOI / stage-form question | Company-level answers |
+
+Both are **long format** — a row per answer, not a column per question — so they
+keep working when questions are added or removed. Answers are already rendered
+as text: arrays join with ` | `, empty strings come back as `NULL`.
+
+Question text comes from the `PIQQuestion` catalogue, mirrored from
+`piq-config.ts` in afrizonemart-v2. **When that config changes**, regenerate and
+put the output in a new migration:
+
+```bash
+node scripts/gen-piq-catalog.mjs      # in afrizonemart-v2
+```
+
+Everything one supplier has ever answered:
+
+```sql
+SELECT product, section, question, answer
+FROM v_piq_answer
+WHERE company = 'Adia Foods'
+ORDER BY product, question_position;
+```
+
+Compare one answer across every supplier — the thing raw JSON makes painful:
+
+```sql
+SELECT company, product, answer AS shelf_life
+FROM v_piq_answer
+WHERE question_id = 'shelf_life'
+ORDER BY company;
+```
+
+Required questions a product still hasn't answered:
+
+```sql
+SELECT p.name AS product, q."sectionTitle" AS section, q.label AS missing
+FROM "ProductPIQ" p
+CROSS JOIN "PIQQuestion" q
+LEFT JOIN v_piq_answer v
+       ON v.piq_id = p.id AND v.question_id = q.id AND v.answer IS NOT NULL
+WHERE q.required AND v.question_id IS NULL
+ORDER BY p.name, q."position";
+```
+
+Certifications claimed across the network. Multiselect answers arrive as one
+` | `-joined string, so split them before counting — grouping on `answer`
+directly would count `NAFDAC | SON` as its own category:
+
+```sql
+SELECT trim(cert) AS certification, count(DISTINCT company) AS suppliers
+FROM v_piq_answer, unnest(string_to_array(answer, ' | ')) AS cert
+WHERE question_id = 'quality_marks' AND answer IS NOT NULL
+GROUP BY 1 ORDER BY suppliers DESC, certification;
+```
+
+> **Charts, or letting non-technical staff self-serve?** Beekeeper is a SQL
+> client — one desktop app, one person, needs database credentials. Point
+> [Metabase](https://www.metabase.com/) at these same views instead and sourcing
+> or QC can build their own dashboards without SQL or a DB login. The views are
+> the part that matters; either tool sits on top of them.
