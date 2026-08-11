@@ -2564,6 +2564,9 @@ enum DocumentType {
   POLICY
   REGULATION
   TREATY
+  /// Falls outside the fixed list — the paired `customDocType` field
+  /// carries the admin/intern-entered label.
+  OTHER
 }
 
 enum DocumentStatus {
@@ -2578,6 +2581,9 @@ model GovDocument {
   /// 2-letter ISO country code — same convention as Product.origin.
   country           String
   docType           DocumentType
+  /// Required label when `docType` is OTHER — the dropdown didn't
+  /// have a fit, so the submitter typed one in.
+  customDocType     String?
   description       String?        @db.Text
   /// Who published it (e.g. "National Assembly of Nigeria").
   issuingBody       String?
@@ -2585,6 +2591,9 @@ model GovDocument {
   /// lets a visitor verify currency/authenticity against the source.
   officialSourceUrl String?
   publishedDate     DateTime?
+  /// Product-card visual on the storefront/library grid — falls back
+  /// to a generic document icon when absent.
+  coverImageUrl     String?
   fileUrl           String
   fileSizeBytes     Int?
   status            DocumentStatus @default(DRAFT)
@@ -2612,10 +2621,12 @@ model DocumentSubmission {
   slug              String
   country           String
   docType           DocumentType
+  customDocType     String?
   description       String?
   issuingBody       String?
   officialSourceUrl String?
   publishedDate     DateTime?
+  coverImageUrl     String?
   fileUrl           String
   fileSizeBytes     Int?
 

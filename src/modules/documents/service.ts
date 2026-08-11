@@ -24,10 +24,12 @@ function serializePublic(d: {
   title: string;
   country: string;
   docType: string;
+  customDocType: string | null;
   description: string | null;
   issuingBody: string | null;
   officialSourceUrl: string | null;
   publishedDate: Date | null;
+  coverImageUrl: string | null;
   fileUrl: string;
   fileSizeBytes: number | null;
   downloadCount: number;
@@ -39,10 +41,12 @@ function serializePublic(d: {
     title: d.title,
     country: d.country,
     docType: d.docType,
+    customDocType: d.customDocType,
     description: d.description,
     issuingBody: d.issuingBody,
     officialSourceUrl: d.officialSourceUrl,
     publishedDate: d.publishedDate?.toISOString() ?? null,
+    coverImageUrl: d.coverImageUrl,
     fileUrl: d.fileUrl,
     fileSizeBytes: d.fileSizeBytes,
     downloadCount: d.downloadCount,
@@ -181,10 +185,12 @@ export async function adminCreateDocument(body: UpsertDocumentBody) {
       title: body.title,
       country: body.country.toUpperCase(),
       docType: body.docType,
+      customDocType: body.docType === 'OTHER' ? (body.customDocType ?? null) : null,
       description: body.description ?? null,
       issuingBody: body.issuingBody ?? null,
       officialSourceUrl: body.officialSourceUrl ?? null,
       publishedDate: body.publishedDate ? new Date(body.publishedDate) : null,
+      coverImageUrl: body.coverImageUrl ?? null,
       fileUrl: body.fileUrl,
       fileSizeBytes: body.fileSizeBytes ?? null,
       status: body.status,
@@ -210,7 +216,10 @@ export async function adminUpdateDocument(id: string, body: PartialDocumentBody)
       ...(body.slug !== undefined && { slug: body.slug }),
       ...(body.title !== undefined && { title: body.title }),
       ...(body.country !== undefined && { country: body.country.toUpperCase() }),
-      ...(body.docType !== undefined && { docType: body.docType }),
+      ...(body.docType !== undefined && {
+        docType: body.docType,
+        customDocType: body.docType === 'OTHER' ? (body.customDocType ?? null) : null,
+      }),
       ...(body.description !== undefined && { description: body.description ?? null }),
       ...(body.issuingBody !== undefined && { issuingBody: body.issuingBody ?? null }),
       ...(body.officialSourceUrl !== undefined && {
@@ -219,6 +228,7 @@ export async function adminUpdateDocument(id: string, body: PartialDocumentBody)
       ...(body.publishedDate !== undefined && {
         publishedDate: body.publishedDate ? new Date(body.publishedDate) : null,
       }),
+      ...(body.coverImageUrl !== undefined && { coverImageUrl: body.coverImageUrl ?? null }),
       ...(body.fileUrl !== undefined && { fileUrl: body.fileUrl }),
       ...(body.fileSizeBytes !== undefined && { fileSizeBytes: body.fileSizeBytes ?? null }),
       ...(body.status !== undefined && { status: body.status }),
