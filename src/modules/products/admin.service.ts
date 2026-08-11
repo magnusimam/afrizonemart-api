@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
+import { eventBus } from '@/infra/eventBus';
 import { HttpError } from '@/middleware/error-handler';
 import { validateAndNormalizeAttributes } from '@/modules/custom-fields/service';
 import { setProductPlacements } from '@/modules/placements/service';
@@ -192,6 +193,7 @@ export async function adminCreateProduct(
       })),
     );
   }
+  await eventBus.emit('product.created', { productId: created.id });
   return created;
 }
 
@@ -297,6 +299,7 @@ export async function adminUpdateProduct(
     });
   }
 
+  await eventBus.emit('product.updated', { productId: id });
   return updated;
 }
 
@@ -319,6 +322,7 @@ export async function adminDeleteProduct(id: string): Promise<void> {
   // Best-effort R2 cleanup. Never throws (see uploads/cleanup.ts).
   // Orphans on R2 failure get swept by the monthly orphan-scan cron.
   void deleteImagesByUrl(imageUrls);
+  await eventBus.emit('product.deleted', { productId: id });
 }
 
 export interface BulkActionResult {
@@ -382,6 +386,9 @@ export async function adminBulkProductAction(
       // Best-effort R2 cleanup. Fire-and-forget; monthly orphan-scan
       // cron is the safety net for any R2 failures.
       void deleteImagesByUrl(imageUrls);
+      await Promise.all(
+        deletable.map((id) => eventBus.emit('product.deleted', { productId: id })),
+      );
     }
     return {
       affected: deletable.length,
@@ -397,6 +404,7 @@ export async function adminBulkProductAction(
       where: { id: { in: ids } },
       data: { inStock: action.value },
     });
+    await Promise.all(ids.map((id) => eventBus.emit('product.updated', { productId: id })));
     return { affected: r.count, skipped: [] };
   }
 
@@ -428,8 +436,12 @@ export async function adminBulkProductAction(
           source: 'BULK',
           reason: action.reason ?? null,
         });
-        if (!r.noop) affected++;
-        else skipped.push({ id: row.id, reason: 'No-op for this row' });
+        if (!r.noop) {
+          affected++;
+          await eventBus.emit('product.updated', { productId: row.id });
+        } else {
+          skipped.push({ id: row.id, reason: 'No-op for this row' });
+        }
       } catch (err) {
         skipped.push({
           id: row.id,
@@ -446,6 +458,7 @@ export async function adminBulkProductAction(
     where: { id: { in: ids } },
     data: { categoryId },
   });
+  await Promise.all(ids.map((id) => eventBus.emit('product.updated', { productId: id })));
   return { affected: r.count, skipped: [] };
 }
 

@@ -144,6 +144,15 @@ export interface EventMap {
     country: string;
     docType: string;
   };
+  /// Search & Discovery Phase 0 (2026-08-11) — catalogue-change signal
+  /// for the indexing pipeline (design spec Section 5.1). Postgres's
+  /// generated `searchVector` column self-maintains today, so nothing
+  /// subscribes yet; this exists so Phase 2 (embedding service, a real
+  /// external index) has a change feed to hook without touching the
+  /// product write paths again.
+  'product.created': { productId: string };
+  'product.updated': { productId: string };
+  'product.deleted': { productId: string };
 }
 
 type Handler<K extends keyof EventMap> = (
