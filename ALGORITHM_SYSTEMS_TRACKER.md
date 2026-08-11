@@ -61,13 +61,115 @@ revenue.
 - [ ] **Personalized homepage / for-you ranking** (TBD) — per-user feed
       ordered by browsing, purchase, and location history.
       Design doc: _pending_ · PR(s): _none_ · Notes: _none_
-- [ ] **Search ranking & relevance** (P1) — query understanding, typo
+- [~] **Search ranking & relevance** (P1) — query understanding, typo
       tolerance, and multilingual matching across our 100+ supported
-      languages.
-      Design doc: _pending_ · PR(s): _none_ · Notes: _none_
-- [ ] **Autocomplete / query suggestion** (TBD) — predictive search
-      suggestions as the customer types.
-      Design doc: _pending_ · PR(s): _none_ · Notes: _none_
+      languages. **System 1 of the algorithm roadmap** — full design in
+      `Afrizonemart_Search_Discovery_Design_Spec.docx` (Magnus,
+      2026-08-11). Also covers Autocomplete (below) — same spec, same
+      build, Section 12.
+      Design doc: `Afrizonemart_Search_Discovery_Design_Spec.docx` ·
+      PR(s): `afrizonemart-api` search-phase-0 branch (backend) ·
+      Notes: Phase 0 shipped as **Postgres-native** full-text search
+      (generated `tsvector` + GIN index + `pg_trgm`), not OpenSearch —
+      deliberate substitution to ship without provisioning a new
+      cluster; revisit OpenSearch specifically when Phase 2 needs real
+      vector/ANN storage for semantic retrieval. See sub-checklist.
+
+      **Sub-checklist** (from the spec's Implementation Roadmap,
+      Section 17 — phase timelines are relative effort, not dates):
+
+      _Phase 0 — Foundation_
+      - [x] Search index — Postgres generated `tsvector` column
+            (field-weighted: name A / brand B / shortDescription C /
+            description D, `'simple'` config) + GIN index. Migration
+            `20260811120000_search_phase0`. *(Substitutes the spec's
+            "search engine cluster" line — see note above.)*
+      - [x] Event-driven catalogue sync — `product.created` /
+            `product.updated` / `product.deleted` events added to
+            `eventBus` and emitted from every admin product write path
+            (single + bulk). Not consumed by anything yet: Postgres's
+            generated column self-maintains today, so this is
+            groundwork for Phase 2's real indexing pipeline, not a
+            live dependency.
+      - [x] BM25-equivalent keyword search — `ts_rank_cd` over the
+            tsvector, `modules/search/repository.ts:lexicalSearch`.
+      - [ ] Facets — filtering is wired (reuses the exact shop-filter
+            contract: category+descendants, origin, price, rating,
+            inStock, onSale, shipsToMe/country) but there's no
+            computed facet-*count* aggregation (e.g. "Electronics
+            (42)") yet. Not started.
+      - [x] Basic autocomplete — query completions (mined from
+            `SearchQueryLog`) + product/category jumps (trigram +
+            prefix match), `GET /api/search/autocomplete`.
+      - [x] Query logging — `SearchQueryLog` model, written on every
+            search; `POST /api/search/click` for downstream CTR once
+            the frontend wires it in.
+      - [ ] **Frontend** — no UI yet. `GET /api/search` and
+            `/api/search/autocomplete` exist and are live; the
+            storefront search bar, results page, and autocomplete
+            dropdown still need to be built and pointed at them. This
+            is the immediate next step.
+      - [ ] p95 < 200ms verified under real load — not yet measured
+            (no production traffic on the new endpoint yet).
+      - [ ] Zero-result rate < 5% baseline — nothing to baseline until
+            the frontend sends real traffic.
+
+      _Phase 1 — Query understanding (Weeks 4–8 per spec)_
+      - [x] Normalization (partial) — NFC, trim, lowercase, whitespace
+            collapse (`service.ts:normalizeQuery`). Diacritic folding
+            not yet explicit (relies on `'simple'` tsvector config).
+      - [ ] Language detection — not started.
+      - [ ] Spell correction (query-log-mined) — not started; trigram
+            fallback (Phase 0, done) covers the simplest typo cases
+            but isn't real spell correction.
+      - [ ] Seed synonym dictionary — not started.
+      - [x] Zero-result recovery — trigram similarity fallback
+            (`trigramFallbackSearch`) when the lexical query returns
+            nothing on page 1.
+
+      _Phase 2 — Semantic / hybrid (Weeks 9–14 per spec)_
+      - [ ] Embedding service (BGE-M3 / Qwen3-Embedding self-host, or
+            a managed API to prototype) — not started. **Infra
+            decision needed from Magnus** (self-host vs managed,
+            cost/ops tradeoff per spec Section 10.2/14) before this
+            can start.
+      - [ ] Vector index — not started. Likely where OpenSearch (or a
+            dedicated vector store) actually enters the stack, per the
+            Phase-0 substitution note above.
+      - [ ] RRF hybrid retrieval (fuse lexical + semantic) — not
+            started.
+      - [ ] Cross-lingual search — not started.
+      - [ ] Weighted-score / L1 ranker — not started (Phase 0 uses
+            `ts_rank_cd` + rating/reviewCount/createdAt tie-breakers
+            directly; no separate scoring formula yet).
+
+      _Phase 3 — Learned ranking (Weeks 15–20 per spec)_
+      - [ ] Feature store / signal logging beyond `SearchQueryLog` —
+            not started.
+      - [ ] LTR model (LambdaMART/XGBoost) — not started.
+      - [ ] Business re-ranking beyond the Phase-0 deliverability hard
+            filter — bounded origin/margin/private-label boosts not
+            started.
+
+      _Phase 4 — Personalization & cold-start (ongoing per spec)_
+      - [ ] Light personalization signals — not started.
+      - [ ] Bandit-based new-item exploration / guaranteed-impression
+            caps — not started (ties to the separate "Cold-start
+            recommendations" tracker entry above).
+
+      _Cross-cutting / not phase-specific_
+      - [ ] Offline evaluation harness — judgement sets, golden query
+            set, NDCG/MRR/Recall tracking. Not started.
+      - [ ] Online A/B testing & interleaving for ranker changes — not
+            started (ties to "A/B testing & experimentation engine"
+            in Platform Intelligence below).
+- [~] **Autocomplete / query suggestion** (TBD) — predictive search
+      suggestions as the customer types. Built together with Search
+      ranking & relevance above (same spec, Section 12) — see that
+      entry's sub-checklist for status. Backend shipped
+      (`GET /api/search/autocomplete`); frontend dropdown not built.
+      Design doc: `Afrizonemart_Search_Discovery_Design_Spec.docx` ·
+      PR(s): same as Search ranking & relevance · Notes: see above.
 - [ ] **Frequently bought together & bundling** (TBD) — surfaces
       complementary items to raise average order value.
       Design doc: _pending_ · PR(s): _none_ · Notes: _none_
@@ -212,6 +314,27 @@ time.
 _(Newest first. One entry per system when its spec lands or it ships —
 mirrors the `ARCHITECTURE_TRACKER.md` close-out convention: plain-English
 summary of what we built, when, and where the code lives.)_
+
+- **2026-08-11** — Search & Discovery Phase 0 (backend) shipped against
+  `Afrizonemart_Search_Discovery_Design_Spec.docx`. New `modules/search/`
+  (schema/repository/service/controller/routes) in `afrizonemart-api`:
+  `GET /api/search` (lexical full-text via a generated `tsvector` column +
+  `ts_rank_cd`, trigram zero-result fallback, reuses the shop-filter
+  contract for category/origin/price/rating/stock/deliverability),
+  `GET /api/search/autocomplete` (query completions + product jumps),
+  `POST /api/search/click` (CTR groundwork). New `SearchQueryLog` model
+  (the query-log loop). New `product.created/updated/deleted` eventBus
+  events, emitted from every admin product write path — not consumed yet,
+  groundwork for Phase 2's real indexing pipeline. Migration
+  `20260811120000_search_phase0` dry-run-validated against prod (rolled
+  back transaction) before merge. Deliberately substituted Postgres FTS
+  for the spec's OpenSearch recommendation at Phase 0 to ship without a
+  new infra decision — flagged for revisit at Phase 2 (semantic/vector
+  search actually needs it). `tsc --noEmit`, `npm run build`, and
+  `vitest run` (22/22) all clean. **Not yet done**: frontend (no search
+  bar/results page/autocomplete UI wired), facet counts, perf
+  verification under real traffic. See the expanded sub-checklist under
+  "Search ranking & relevance" above for full phase-by-phase status.
 
 - **2026-08-11** — Tracker created from `Afrizonemart_Algorithm_Systems.docx`.
   30 systems stubbed across 7 categories, phase-tagged per the doc's

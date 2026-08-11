@@ -248,7 +248,7 @@ export async function findProductBySlug(slug: string) {
  * query falls through to a normal exact-match (which will yield zero
  * results — caller will surface "no products" rather than 500).
  */
-async function categorySlugWithDescendants(slug: string): Promise<string[]> {
+export async function categorySlugWithDescendants(slug: string): Promise<string[]> {
   // Single read of the (small) category tree. ~50 rows on a real
   // catalog; the in-memory walk avoids a recursive CTE / multiple
   // round-trips and keeps the function easy to reason about.
