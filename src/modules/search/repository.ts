@@ -31,6 +31,7 @@ export interface SearchRow {
   reviewCount: number;
   images: string[];
   inStock: boolean;
+  sellableCountries: string[];
   categoryId: string | null;
   categorySlug: string | null;
   categoryName: string | null;
@@ -91,8 +92,8 @@ function buildStructuredFilters(query: SearchQuery, categoryIds: string[] | null
 
 const SELECT_FIELDS = Prisma.sql`
   p.id, p.slug, p.name, p.brand, p.price, p."comparePrice", p."discountPercent",
-  p.origin, p.rating, p."reviewCount", p.images, p."inStock", p."categoryId",
-  c.slug AS "categorySlug", c.name AS "categoryName", p."createdAt"
+  p.origin, p.rating, p."reviewCount", p.images, p."inStock", p."sellableCountries",
+  p."categoryId", c.slug AS "categorySlug", c.name AS "categoryName", p."createdAt"
 `;
 
 const FROM_JOIN = Prisma.sql`
