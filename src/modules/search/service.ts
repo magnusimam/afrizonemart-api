@@ -50,6 +50,7 @@ function serializeRow(row: SearchRow) {
     reviewCount: row.reviewCount,
     images: row.images,
     inStock: row.inStock,
+    sellableCountries: row.sellableCountries,
     category: row.categoryId
       ? { id: row.categoryId, slug: row.categorySlug, name: row.categoryName }
       : null,
