@@ -42,10 +42,12 @@ const SUBMISSION_SELECT = {
   slug: true,
   country: true,
   docType: true,
+  customDocType: true,
   description: true,
   issuingBody: true,
   officialSourceUrl: true,
   publishedDate: true,
+  coverImageUrl: true,
   fileUrl: true,
   fileSizeBytes: true,
   rejectionReason: true,
@@ -73,10 +75,12 @@ export async function createDocumentSubmission(
       slug: body.slug || slugify(body.title),
       country: body.country.toUpperCase(),
       docType: body.docType,
+      customDocType: body.docType === 'OTHER' ? (body.customDocType ?? null) : null,
       description: body.description ?? null,
       issuingBody: body.issuingBody ?? null,
       officialSourceUrl: body.officialSourceUrl ?? null,
       publishedDate: body.publishedDate ? new Date(body.publishedDate) : null,
+      coverImageUrl: body.coverImageUrl ?? null,
       fileUrl: body.fileUrl,
       fileSizeBytes: body.fileSizeBytes ?? null,
       payRate,
@@ -111,13 +115,17 @@ export async function updateDocumentSubmission(
   if (body.title !== undefined) data.title = body.title;
   if (body.slug !== undefined) data.slug = body.slug || (body.title ? slugify(body.title) : undefined);
   if (body.country !== undefined) data.country = body.country.toUpperCase();
-  if (body.docType !== undefined) data.docType = body.docType;
+  if (body.docType !== undefined) {
+    data.docType = body.docType;
+    data.customDocType = body.docType === 'OTHER' ? (body.customDocType ?? null) : null;
+  }
   if (body.description !== undefined) data.description = body.description ?? null;
   if (body.issuingBody !== undefined) data.issuingBody = body.issuingBody ?? null;
   if (body.officialSourceUrl !== undefined) data.officialSourceUrl = body.officialSourceUrl ?? null;
   if (body.publishedDate !== undefined) {
     data.publishedDate = body.publishedDate ? new Date(body.publishedDate) : null;
   }
+  if (body.coverImageUrl !== undefined) data.coverImageUrl = body.coverImageUrl ?? null;
   if (body.fileUrl !== undefined) data.fileUrl = body.fileUrl;
   if (body.fileSizeBytes !== undefined) data.fileSizeBytes = body.fileSizeBytes ?? null;
 
@@ -235,10 +243,12 @@ export async function reviewDocumentSubmission(
     title: sub.title,
     country: sub.country,
     docType: sub.docType,
+    customDocType: sub.customDocType ?? null,
     description: sub.description ?? null,
     issuingBody: sub.issuingBody ?? null,
     officialSourceUrl: sub.officialSourceUrl ?? null,
     publishedDate: sub.publishedDate ? sub.publishedDate.toISOString() : null,
+    coverImageUrl: sub.coverImageUrl ?? null,
     fileUrl: sub.fileUrl,
     fileSizeBytes: sub.fileSizeBytes ?? null,
     status: 'PUBLISHED',

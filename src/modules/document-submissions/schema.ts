@@ -16,17 +16,28 @@ const slugField = z
   .max(120)
   .optional();
 
-const DOC_TYPES = ['CONSTITUTION', 'ACT', 'BILL', 'POLICY', 'REGULATION', 'TREATY'] as const;
+const DOC_TYPES = [
+  'CONSTITUTION',
+  'ACT',
+  'BILL',
+  'POLICY',
+  'REGULATION',
+  'TREATY',
+  'OTHER',
+] as const;
 
 export const upsertDocumentSubmissionBodySchema = z.object({
   title: z.string().trim().min(1).max(200),
   slug: slugField,
   country: z.string().length(2),
   docType: z.enum(DOC_TYPES),
+  /// Required when docType is OTHER — the label the dropdown didn't have.
+  customDocType: z.string().trim().min(1).max(60).nullish(),
   description: z.string().trim().max(4000).nullish(),
   issuingBody: z.string().trim().max(200).nullish(),
   officialSourceUrl: z.string().url().nullish(),
   publishedDate: z.string().datetime().nullish(),
+  coverImageUrl: z.string().url().nullish(),
   fileUrl: z.string().url(),
   fileSizeBytes: z.number().int().nonnegative().nullish(),
 });
