@@ -68,7 +68,8 @@ revenue.
       2026-08-11). Also covers Autocomplete (below) — same spec, same
       build, Section 12.
       Design doc: `Afrizonemart_Search_Discovery_Design_Spec.docx` ·
-      PR(s): `afrizonemart-api` search-phase-0 branch (backend) ·
+      PR(s): `afrizonemart-api` #79, #80 (backend) ·
+      `afrizonemart-v2` #141 (frontend) ·
       Notes: Phase 0 shipped as **Postgres-native** full-text search
       (generated `tsvector` + GIN index + `pg_trgm`), not OpenSearch —
       deliberate substitution to ship without provisioning a new
@@ -104,11 +105,21 @@ revenue.
       - [x] Query logging — `SearchQueryLog` model, written on every
             search; `POST /api/search/click` for downstream CTR once
             the frontend wires it in.
-      - [ ] **Frontend** — no UI yet. `GET /api/search` and
-            `/api/search/autocomplete` exist and are live; the
-            storefront search bar, results page, and autocomplete
-            dropdown still need to be built and pointed at them. This
-            is the immediate next step.
+      - [x] **Frontend** (`afrizonemart-v2` #141) — header `SearchBar`
+            (mobile + desktop) with a debounced autocomplete dropdown,
+            SafeBoundary-wrapped with a plain-form fallback; `/search`
+            now calls the real `GET /api/search` (was the old naive
+            `/api/products?q=` ILIKE match) and forwards the same
+            filter/sort params `/shop` reads — `FiltersSidebar`/
+            `ShopToolbar` were already rendered there but silently
+            non-functional; now wired. Verified against production
+            data (real ranked results, typo fallback, price sort) via
+            a local dev server pointed at `api.afrizonemart.com` —
+            Chrome browser tools weren't available this session to
+            click-test the dropdown interactively, so that's still
+            outstanding. Click-through tracking UI
+            (`POST /api/search/click` exists server-side) and facet
+            counts are not wired.
       - [ ] p95 < 200ms verified under real load — not yet measured
             (no production traffic on the new endpoint yet).
       - [ ] Zero-result rate < 5% baseline — nothing to baseline until
@@ -314,6 +325,19 @@ time.
 _(Newest first. One entry per system when its spec lands or it ships —
 mirrors the `ARCHITECTURE_TRACKER.md` close-out convention: plain-English
 summary of what we built, when, and where the code lives.)_
+
+- **2026-08-11** — Search & Discovery Phase 0 (frontend) shipped:
+  `afrizonemart-v2` #141 wires `SearchBar` (header autocomplete, mobile +
+  desktop) and `/search` into the real `GET /api/search` /
+  `GET /api/search/autocomplete` endpoints, replacing the old naive
+  `/api/products?q=` match and fixing `/search`'s filter/sort params
+  (previously rendered but ignored). Verified end-to-end against
+  production data (real ranked results, typo fallback, sort) via a
+  local dev server pointed at the live API — `tsc`, `next lint`, and
+  `next build` all clean. Deployed; confirmed live via Vercel's
+  deployment API. Not wired: click-through tracking UI, facet counts,
+  interactive browser click-test of the dropdown (no Chrome tooling
+  available this session).
 
 - **2026-08-11** — Search & Discovery Phase 0 (backend) shipped against
   `Afrizonemart_Search_Discovery_Design_Spec.docx`. New `modules/search/`
