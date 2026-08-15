@@ -56,6 +56,14 @@ export const trendingQuerySchema = z.object({
 });
 export type TrendingQuery = z.infer<typeof trendingQuerySchema>;
 
+/// Phase 2 — "For You" and "Recently viewed", both seedless (userId
+/// comes from the auth context, not the query string) and home-scoped
+/// by default, same shape as `trendingQuerySchema`.
+export const forYouQuerySchema = trendingQuerySchema;
+export type ForYouQuery = TrendingQuery;
+export const recentlyViewedQuerySchema = trendingQuerySchema;
+export type RecentlyViewedQuery = TrendingQuery;
+
 /// Fired by the client when a viewer clicks a recommended item — same
 /// first-click-wins convention as `modules/search`'s
 /// `trackClickBodySchema`.

@@ -3,7 +3,9 @@ import { optionalAuth } from '@/middleware/auth';
 import { asyncHandler } from '@/middleware/async-handler';
 import {
   alsoBoughtHandler,
+  forYouHandler,
   frequentlyBoughtTogetherHandler,
+  recentlyViewedHandler,
   similarHandler,
   trackClickHandler,
   trendingHandler,
@@ -24,4 +26,6 @@ recommendationsRoutes.get(
   asyncHandler(frequentlyBoughtTogetherHandler),
 );
 recommendationsRoutes.get('/viewed-also-viewed', optionalAuth, asyncHandler(viewedAlsoViewedHandler));
+recommendationsRoutes.get('/for-you', optionalAuth, asyncHandler(forYouHandler));
+recommendationsRoutes.get('/recently-viewed', optionalAuth, asyncHandler(recentlyViewedHandler));
 recommendationsRoutes.post('/click', asyncHandler(trackClickHandler));
