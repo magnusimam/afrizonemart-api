@@ -64,15 +64,20 @@ revenue.
       Phase 0 covers both.
       Design doc:
       `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
-      PR(s): `afrizonemart-api` #82 (backend) · `afrizonemart-v2` #142
-      (web frontend) · `afrizonemart-mobile` #83 (mobile frontend) ·
+      PR(s): Phase 0 — `afrizonemart-api` #82 (backend) ·
+      `afrizonemart-v2` #142 (web frontend) · `afrizonemart-mobile` #83
+      (mobile frontend). Phase 1 — `afrizonemart-api` #_pending_
+      (backend) · frontend PRs pending ·
       Notes: Phase 0 shipped — "similar products" (content-based
       weighted score: category/brand/origin/price-band + quality
       tie-breaker, since there's no embedding space to reuse yet — see
       the deliberate-substitution note in the sub-checklist) and
-      "trending near you" (existing view-count trending +hard
-      deliverability filter, wrapped in the new module). See
-      sub-checklist.
+      "trending near you" (existing view-count trending + hard
+      deliverability filter, wrapped in the new module). Phase 1
+      shipped (backend) — co-purchase ("customers also bought",
+      "frequently bought together") and co-view ("viewed also viewed"),
+      all three with graceful degradation to the Phase 0 content-based
+      retriever when interaction data is thin. See sub-checklist.
 
       **Sub-checklist** (from the spec's Implementation Roadmap,
       Section 18 — phase timelines are relative effort, not dates):
@@ -133,17 +138,34 @@ revenue.
       - [ ] Catalogue coverage (> 80% target) — not yet measured.
 
       _Phase 1 — Co-visitation (Weeks 4–8 per spec)_
-      - [ ] Co-purchase / co-view tables mined from order/view logs —
-            not started.
-      - [ ] "Customers also bought" (product page) — not started.
-      - [ ] "Frequently bought together" (cart/checkout) — not
-            started. The cart page's cross-sell section currently
-            reuses the Phase 0 "similar" module as a placeholder (same
-            as before this change, just on a better retriever) — true
-            co-purchase-based bundling is this line item, separately
-            tracked below too.
-      - [ ] "Viewed also viewed" (co-view, distinct from content
-            similarity) — not started.
+      - [x] Co-purchase / co-view — live-queried at request time
+            (`modules/recommendations/repository.ts:coPurchase` self-
+            joins `OrderItem` on `orderId`; `viewedAlsoViewed`
+            self-joins `ProductView` on session/user within a 90-day
+            window), not a precomputed batch table. Substitution note:
+            spec Section 5.2 calls for nightly/periodic batch jobs
+            precomputing co-visitation tables — deferred until real
+            data volume makes the live self-join too expensive; the
+            current catalogue/order volume doesn't need it yet. Revisit
+            if `also-bought`/`frequently-bought-together`/
+            `viewed-also-viewed` query latency becomes a problem.
+      - [x] "Customers also bought" (product page) —
+            `GET /api/recommendations/also-bought`.
+      - [x] "Frequently bought together" (cart/checkout) —
+            `GET /api/recommendations/frequently-bought-together`,
+            seeded by every product already in the cart (not just the
+            last item added). Cart page's cross-sell section switched
+            from the Phase 0 "similar" placeholder to this.
+      - [x] "Viewed also viewed" (co-view, distinct from content
+            similarity) — `GET /api/recommendations/viewed-also-viewed`.
+      - [x] Graceful degradation (spec Section 3.1) — all three pad
+            with the Phase 0 content-based `similarProducts` retriever
+            when co-purchase/co-view data is thin. Confirmed necessary,
+            not theoretical: tested against real prod order data and
+            found most products have zero co-purchase signal today
+            (multi-item orders are still rare this early) — without the
+            pad, "Customers also bought" would render empty on most
+            PDPs.
 
       _Phase 2 — Personalization (Weeks 9–14 per spec)_
       - [ ] User profile (affinities: category/brand/origin/price-band,
@@ -331,13 +353,18 @@ revenue.
       (`GET /api/search/autocomplete`); frontend dropdown not built.
       Design doc: `Afrizonemart_Search_Discovery_Design_Spec.docx` ·
       PR(s): same as Search ranking & relevance · Notes: see above.
-- [ ] **Frequently bought together & bundling** (TBD) — surfaces
-      complementary items to raise average order value. Phase 1 of
-      System 2 above (Recommendations & Personalization) — co-purchase
-      mining, not built. See that entry's sub-checklist.
+- [x] **Frequently bought together & bundling** (P1, shipped backend) —
+      surfaces complementary items to raise average order value. Built
+      together with Product recommendation engine above (System 2,
+      same spec, Phase 1) — see that entry's sub-checklist. Also covers
+      "Customers also bought" and "Viewed also viewed", same PR.
+      Frontend (cart page cross-sell switch, PDP module additions) not
+      wired yet.
       Design doc:
       `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
-      PR(s): _none yet_ · Notes: _none_
+      PR(s): same as Product recommendation engine (Phase 1) · Notes:
+      co-purchase mined live via `OrderItem` self-join, not a
+      precomputed batch table — see sub-checklist substitution note.
 - [x] **Related / similar products** (P0, shipped) — item-to-item
       similarity for the product detail page. Built together with
       Product recommendation engine above (System 2, same spec, Phase
@@ -505,6 +532,45 @@ time.
 _(Newest first. One entry per system when its spec lands or it ships —
 mirrors the `ARCHITECTURE_TRACKER.md` close-out convention: plain-English
 summary of what we built, when, and where the code lives.)_
+
+- **2026-08-15** — Recommendations & Personalization Phase 0 merged and
+  deployed live: `afrizonemart-api` #82 → Railway (verified
+  `GET /api/recommendations/similar` and `/trending` responding with
+  real data and a populated `impressionId` in prod, confirming the
+  migration applied on boot); `afrizonemart-v2` #142 → Vercel (verified
+  "Trending Near You" rendering on the live homepage); `afrizonemart-mobile`
+  #83 → EAS Update OTA push to the `production` branch (published,
+  both iOS and Android update IDs confirmed) — no native changes, so no
+  app store build/resubmission needed for this one.
+
+- **2026-08-15** — Recommendations & Personalization **Phase 1**
+  (backend) shipped: new `modules/recommendations/repository.ts`
+  functions `coPurchase` (self-joins `OrderItem` on `orderId`, grouped
+  by co-occurring product, ranked by distinct-order count) and
+  `viewedAlsoViewed` (self-joins `ProductView` on session/user within a
+  90-day window) — both live-queried at request time rather than a
+  precomputed batch table, a deliberate substitution for the spec's
+  Section 5.2 batch-job recommendation (see sub-checklist). Three new
+  endpoints: `GET /api/recommendations/also-bought`,
+  `GET /api/recommendations/frequently-bought-together` (seeded by
+  every product in the cart, not just the last one added),
+  `GET /api/recommendations/viewed-also-viewed`. All three fall back
+  to the Phase 0 content-based `similarProducts` retriever when
+  co-purchase/co-view data is thin — confirmed necessary by testing
+  against real prod order data: most products currently have zero
+  co-purchase signal (multi-item orders are still rare this early), so
+  without the fallback "Customers also bought" would render empty on
+  most PDPs today. `tsc --noEmit` and `npm run build` both clean; all
+  three endpoints live-tested against real prod data via a local
+  server pointed at `DATABASE_PUBLIC_URL` (`viewed-also-viewed`
+  returned real co-view pairs immediately; `also-bought` correctly
+  returned empty before the fallback was added, confirmed against the
+  raw order rows, then correctly padded after). **Not yet done**:
+  frontend wiring on web/mobile (cart page switch from the Phase 0
+  "similar" placeholder to the real `frequently-bought-together`, new
+  PDP sections for "Customers also bought" / "Viewed also viewed"),
+  precomputed batch tables if live-join latency ever becomes a
+  problem, Phase 2+ (personalization, reorder, cross-channel).
 
 - **2026-08-15** — Recommendations & Personalization Phase 0 (web +
   mobile frontend) shipped. **Web** (`afrizonemart-v2` #142):

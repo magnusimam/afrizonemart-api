@@ -20,6 +20,34 @@ export const similarQuerySchema = z.object({
 });
 export type SimilarQuery = z.infer<typeof similarQuerySchema>;
 
+/// "Customers also bought" and "Viewed also viewed" — both single-seed
+/// PDP modules, same shape as `similarQuerySchema`.
+export const alsoBoughtQuerySchema = similarQuerySchema;
+export type AlsoBoughtQuery = SimilarQuery;
+export const viewedAlsoViewedQuerySchema = similarQuerySchema;
+export type ViewedAlsoViewedQuery = SimilarQuery;
+
+/// "Frequently bought together" — multi-seed (cart contents), so it
+/// takes a comma-separated list of slugs instead of one `slug`.
+export const frequentlyBoughtTogetherQuerySchema = z.object({
+  slugs: z
+    .string()
+    .trim()
+    .min(1)
+    .transform((v) =>
+      v
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    )
+    .pipe(z.array(z.string()).min(1).max(20)),
+  limit: z.coerce.number().int().positive().max(30).default(12),
+  country: z.string().length(2).optional(),
+  surface: z.enum(['pdp', 'home', 'cart', 'category']).default('cart'),
+  sessionId: z.string().trim().min(1).max(80).optional(),
+});
+export type FrequentlyBoughtTogetherQuery = z.infer<typeof frequentlyBoughtTogetherQuerySchema>;
+
 export const trendingQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(30).default(12),
   country: z.string().length(2).optional(),
