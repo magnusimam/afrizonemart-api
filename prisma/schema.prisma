@@ -149,6 +149,9 @@ model User {
   /// Search queries this user has run. SetNull on delete — keeps the
   /// query-log loop's aggregate signal intact after account deletion.
   searchQueries           SearchQueryLog[]
+  /// Recommendation impressions this user has been served. SetNull on
+  /// delete, same rationale as searchQueries.
+  recommendationImpressions RecommendationImpression[]
   /// Audit trail of price changes this user has made. Read-only
   /// from the User side; writes happen via applyPriceChange().
   priceChanges            ProductPriceChange[]     @relation("PriceChangedBy")
@@ -2689,4 +2692,45 @@ model DocumentSubmission {
   @@index([internId, status])
   @@index([status, createdAt])
   @@index([internId, status, payoutId])
+}
+
+/// Recommendations & Personalization Phase 0 (2026-08-15) — the
+/// impression/click loop from the design spec (Section 16.3 analogue
+/// to Search's SearchQueryLog): every time a recommendation module
+/// serves a batch of items, one row is logged here so later phases can
+/// mine attach-rate, CTR and — eventually — train a learned ranker.
+/// Append-only aside from the single `clickedProductId` backfill.
+model RecommendationImpression {
+  id     String @id @default(cuid())
+  /// Which recommender module served this batch — "similar" |
+  /// "trending" today; new modules (Phase 1+: "also-bought",
+  /// "frequently-bought-together", "for-you", "reorder", ...) reuse
+  /// this same log table rather than growing a parallel one each time.
+  module String
+  /// Where it was shown — "pdp" | "home" | "cart" | "category" — lets
+  /// the same module be evaluated per-surface.
+  surface String
+  /// The product the recommendations were seeded from (e.g. the PDP
+  /// product for "similar"). Null for seedless modules like
+  /// geo/recency "trending".
+  seedProductId String?
+  /// Ordered product ids actually shown, so position can factor into
+  /// CTR analysis later.
+  productIds String[]
+  /// Null for guest sessions — most recommendation traffic, same as
+  /// SearchQueryLog.
+  userId    String?
+  user      User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  sessionId String?
+  /// ISO-2, from the request's resolved storefront country — the
+  /// deliverability zone these candidates were filtered against.
+  country String?
+  /// First product (if any) the viewer clicked from this impression's
+  /// items. Filled in by a follow-up call, not at serve time.
+  clickedProductId String?
+  createdAt        DateTime @default(now())
+
+  @@index([module, createdAt])
+  @@index([userId, createdAt])
+  @@index([seedProductId, createdAt])
 }
