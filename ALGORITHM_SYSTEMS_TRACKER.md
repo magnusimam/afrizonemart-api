@@ -54,13 +54,163 @@ them out of the plan entirely once P1/P2 are stable.
 Drives product findability and basket size — the core levers of e-commerce
 revenue.
 
-- [ ] **Product recommendation engine** (P1, cold-start variant) — hybrid
+- [~] **Product recommendation engine** (P1, cold-start variant) — hybrid
       collaborative-filtering + content-based model powering "customers also
-      bought" and "you may like."
-      Design doc: _pending_ · PR(s): _none_ · Notes: _none_
+      bought" and "you may like." **System 2 of the algorithm roadmap** —
+      full design in
+      `Afrizonemart_Recommendations_Personalization_Design_Spec.docx`
+      (Magnus, 2026-08-15). Also covers Related/similar products and
+      Trending & popularity ranking (below) — same spec, same build,
+      Phase 0 covers both.
+      Design doc:
+      `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
+      PR(s): `afrizonemart-api` #82 (backend) · `afrizonemart-v2` #142
+      (web frontend) · `afrizonemart-mobile` #83 (mobile frontend) ·
+      Notes: Phase 0 shipped — "similar products" (content-based
+      weighted score: category/brand/origin/price-band + quality
+      tie-breaker, since there's no embedding space to reuse yet — see
+      the deliberate-substitution note in the sub-checklist) and
+      "trending near you" (existing view-count trending +hard
+      deliverability filter, wrapped in the new module). See
+      sub-checklist.
+
+      **Sub-checklist** (from the spec's Implementation Roadmap,
+      Section 18 — phase timelines are relative effort, not dates):
+
+      _Phase 0 — Foundation_
+      - [x] Candidate generation — content-similarity retriever
+            (weighted score, `modules/recommendations/repository.ts:
+            similarProducts`) + popularity retriever (wraps the
+            existing `views/service.ts:getTrendingProductIds`,
+            `modules/recommendations/repository.ts:trendingNearYou`).
+            *(Substitutes the spec's embedding-similarity retriever —
+            see deliberate-substitution note below.)*
+      - [x] Business & diversity layer, Phase-0 slice — hard
+            deliverability filter (`sellableCountries`/`origin` vs.
+            viewer country, same predicate Search's `shipsToMe` uses
+            but always-on here per spec Section 9, not opt-in) +
+            in-stock-only + seed self-exclusion. Category diversity
+            injection, exploration budget, and bounded
+            verified-origin/private-label boosts are not built — Phase
+            1+/3 per the module table.
+      - [x] Recommendations API — `GET /api/recommendations/similar`,
+            `GET /api/recommendations/trending`,
+            `POST /api/recommendations/click`. One contract, same
+            shape as `/api/search`'s response envelope.
+      - [x] Impression logging — new `RecommendationImpression` model
+            (module/surface/seedProductId/productIds/country/
+            clickedProductId), same append-only + first-click-wins
+            pattern as `SearchQueryLog`. Migration
+            `20260815120000_recommendations_phase0`, dry-run-validated
+            against prod (rolled back transaction) before merge.
+      - [x] **Web frontend** (`afrizonemart-v2` #142) — PDP "You May
+            Also Like" (`RelatedProducts`/`getRelatedProducts`) and the
+            cart page's cross-sell section both switched from the old
+            same-category-sorted-by-newest naive query to the real
+            `GET /api/recommendations/similar`. New home page section
+            "Trending Near You" (`TrendingNearYouSection`, server
+            component, `no-store`) — this surface didn't exist on web
+            before. No viewer-country resolution exists yet on the web
+            frontend (no geo/shipping-country cookie), so these calls
+            don't pass `country` — degrades to unfiltered-by-
+            deliverability until that context-resolution piece is
+            built.
+      - [x] **Mobile frontend** (`afrizonemart-mobile` #83) — PDP
+            "You may also like" rail (`PdpRelatedRail`) switched from
+            same-category `sort=trending` to the real
+            `GET /api/recommendations/similar`; the same-origin "More
+            from `<Country>`" rail deliberately kept on its original
+            query (distinct browse-by-origin concept, not part of the
+            Phase 0 similarity module). Home's `ForYouFeed` (bottom-of-
+            Home "For You" section — despite the name, it was always
+            generic trending, never personalized) switched from raw
+            `/api/products?sort=trending` to
+            `GET /api/recommendations/trending`; dropped its "Load
+            more" pagination since a recommendation module serves a
+            bounded ranked batch, not a paginated catalog crawl.
+      - [ ] p95 < 150ms verified under real load — not yet measured
+            (no production traffic on the new endpoints yet).
+      - [ ] Catalogue coverage (> 80% target) — not yet measured.
+
+      _Phase 1 — Co-visitation (Weeks 4–8 per spec)_
+      - [ ] Co-purchase / co-view tables mined from order/view logs —
+            not started.
+      - [ ] "Customers also bought" (product page) — not started.
+      - [ ] "Frequently bought together" (cart/checkout) — not
+            started. The cart page's cross-sell section currently
+            reuses the Phase 0 "similar" module as a placeholder (same
+            as before this change, just on a better retriever) — true
+            co-purchase-based bundling is this line item, separately
+            tracked below too.
+      - [ ] "Viewed also viewed" (co-view, distinct from content
+            similarity) — not started.
+
+      _Phase 2 — Personalization (Weeks 9–14 per spec)_
+      - [ ] User profile (affinities: category/brand/origin/price-band,
+            recency, purchase cadence) — not started.
+      - [ ] Real "For You" home feed (ranked by *this* user's profile,
+            not just broad trending) — not started. Mobile's
+            `ForYouFeed` keeps its name/position for this future swap
+            per its own in-code note, but is trending-only today.
+      - [ ] "Recently viewed / continue" — not started (there is a
+            `ProductView` log to build it from once prioritized).
+      - [ ] Personalized ranking layer on top of candidate generation —
+            not started.
+
+      _Phase 3 — Advanced (Weeks 15–20 per spec)_
+      - [ ] Collaborative filtering / sequence models — not started.
+      - [ ] Reorder / replenishment recommender (purchase-cycle
+            prediction) — not started. Flagged in the spec as
+            unusually valuable for Afrizonemart's FMCG/fast-delivery
+            model.
+      - [ ] Bandit-based exploration + guaranteed new-item exposure
+            caps — not started (ties to "Cold-start recommendations"
+            below — Phase 0's content-bootstrap already gives new
+            products a fair shot via the similarity/trending
+            retrievers since neither requires interaction history, but
+            there's no explicit exploration budget or exposure
+            guarantee yet).
+
+      _Phase 4 — Cross-channel (ongoing per spec)_
+      - [ ] Email/push recommendations — not started.
+      - [ ] Diversity & coverage optimization as an ongoing tuning loop
+            — not started (coverage isn't measured yet at all, see
+            Phase 0 exit criteria above).
+
+      _Cross-cutting / not phase-specific_
+      - [ ] Offline evaluation (Recall@k, hit-rate, NDCG per module) —
+            not started.
+      - [ ] Online A/B testing (CTR, attach rate, AOV lift,
+            rec-attributed revenue) — not started.
+      - [ ] Attribution windows (click-through vs. view-through)
+            defined — not started; `queryLogId`-style
+            `impressionId`/`clickedProductId` plumbing exists to
+            support it once windows are defined.
+
+      **Deliberate substitution** (same call as Search Phase 0): the
+      spec's Component 1 (Section 7) specifies a content-similarity
+      retriever built on shared product embeddings + an OpenSearch k-NN
+      index. Neither exists — Search Phase 0 shipped on Postgres
+      full-text instead of embeddings, so there's no vector space to
+      reuse yet. "Similar products" here is a transparent weighted-
+      scoring retriever instead (category/brand/origin/price-band +
+      quality tie-breaker) — exactly the "keep a transparent
+      weighted-scoring fallback ... as the lightweight first-pass
+      stage" the spec itself prescribes for cold conditions (Section
+      8), just promoted to the *primary* Phase 0 method rather than a
+      fallback behind a model that doesn't exist yet. Revisit once
+      Search grows real embeddings (its own Phase 2) — Recommendations
+      Phase 1+ candidate generation can then reuse the same vector
+      index Search would be building for itself, per the spec's own
+      "reuse, don't rebuild" principle (Section 5.1/15).
 - [ ] **Personalized homepage / for-you ranking** (TBD) — per-user feed
-      ordered by browsing, purchase, and location history.
-      Design doc: _pending_ · PR(s): _none_ · Notes: _none_
+      ordered by browsing, purchase, and location history. Phase 2 of
+      System 2 above (Recommendations & Personalization) — see that
+      entry's sub-checklist. Not started; mobile's `ForYouFeed` is
+      trending-only today despite the name.
+      Design doc:
+      `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
+      PR(s): _none yet_ · Notes: _none_
 - [~] **Search ranking & relevance** (P1) — query understanding, typo
       tolerance, and multilingual matching across our 100+ supported
       languages. **System 1 of the algorithm roadmap** — full design in
@@ -182,18 +332,48 @@ revenue.
       Design doc: `Afrizonemart_Search_Discovery_Design_Spec.docx` ·
       PR(s): same as Search ranking & relevance · Notes: see above.
 - [ ] **Frequently bought together & bundling** (TBD) — surfaces
-      complementary items to raise average order value.
-      Design doc: _pending_ · PR(s): _none_ · Notes: _none_
-- [ ] **Related / similar products** (TBD) — item-to-item similarity for the
-      product detail page.
-      Design doc: _pending_ · PR(s): _none_ · Notes: _none_
-- [ ] **Trending & popularity ranking** (TBD) — popularity scoring with
-      recency decay so fresh demand surfaces.
-      Design doc: _pending_ · PR(s): _none_ · Notes: _none_
-- [ ] **Cold-start recommendations** (P1) — handles new users and newly
+      complementary items to raise average order value. Phase 1 of
+      System 2 above (Recommendations & Personalization) — co-purchase
+      mining, not built. See that entry's sub-checklist.
+      Design doc:
+      `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
+      PR(s): _none yet_ · Notes: _none_
+- [x] **Related / similar products** (P0, shipped) — item-to-item
+      similarity for the product detail page. Built together with
+      Product recommendation engine above (System 2, same spec, Phase
+      0) — see that entry's sub-checklist for the full build notes.
+      Design doc:
+      `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
+      PR(s): same as Product recommendation engine · Notes: content-
+      based weighted score, not embeddings — see the deliberate-
+      substitution note above.
+- [x] **Trending & popularity ranking** (P0, shipped) — popularity
+      scoring with recency decay so fresh demand surfaces. Built
+      together with Product recommendation engine above (System 2,
+      same spec, Phase 0) — see that entry's sub-checklist. Wraps the
+      pre-existing `views/service.ts:getTrendingProductIds` (already
+      powering `/api/products?sort=trending`) with a hard
+      deliverability filter and a quality-based pad, exposed as its
+      own module/endpoint with impression logging.
+      Design doc:
+      `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
+      PR(s): same as Product recommendation engine · Notes: _none_
+- [~] **Cold-start recommendations** (P1) — handles new users and newly
       onboarded MSME products with no history — critical given continuous
-      supplier onboarding.
-      Design doc: _pending_ · PR(s): _none_ · Notes: _none_
+      supplier onboarding. Partially addressed as a side effect of
+      System 2 Phase 0: both "similar products" and "trending near
+      you" work from content/behaviour signals that don't require a
+      product's own interaction history, so a brand-new product with
+      zero views/orders still surfaces normally (content bootstrap,
+      spec Section 10.1). What's still missing: an explicit
+      exploration budget / bandit framing and guaranteed minimum
+      exposure caps for new listings (spec Section 10.1, Phase 3) —
+      today a new product's exposure is purely a function of how well
+      it scores, no floor guaranteed.
+      Design doc:
+      `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
+      PR(s): same as Product recommendation engine (partial) · Notes:
+      see System 2 Phase 3 sub-checklist.
 - [ ] **Category & filter auto-classification** (TBD) — auto-tags and
       categorizes incoming supplier products at scale.
       Design doc: _pending_ · PR(s): _none_ · Notes: _none_
@@ -325,6 +505,59 @@ time.
 _(Newest first. One entry per system when its spec lands or it ships —
 mirrors the `ARCHITECTURE_TRACKER.md` close-out convention: plain-English
 summary of what we built, when, and where the code lives.)_
+
+- **2026-08-15** — Recommendations & Personalization Phase 0 (web +
+  mobile frontend) shipped. **Web** (`afrizonemart-v2` #142):
+  `RelatedProducts`/`getRelatedProducts` (PDP "You May Also Like" + cart
+  cross-sell) switched from same-category-sorted-by-newest to the real
+  `GET /api/recommendations/similar`; new home page section "Trending
+  Near You" calling `GET /api/recommendations/trending` (didn't exist
+  on web before). **Mobile** (`afrizonemart-mobile` #83): PDP
+  `PdpRelatedRail`'s "You may also like" rail switched to the same
+  endpoint (its "More from `<Country>`" rail intentionally left as-is
+  — different concept); Home's `ForYouFeed` switched from raw
+  `/api/products?sort=trending` to `GET /api/recommendations/trending`
+  and dropped pagination (a recommendation module serves a bounded
+  batch, not a paginated crawl). No viewer-country resolution exists on
+  web yet, so deliverability filtering only actually activates today on
+  requests that pass `country` explicitly. `tsc --noEmit` and full
+  production builds clean on both `afrizonemart-v2` and
+  `afrizonemart-mobile`. Not done: click-through tracking wiring on
+  either platform (server-side `POST /api/recommendations/click`
+  exists, unused by any client yet), interactive device/browser
+  click-test (no Chrome/Expo device session available this session).
+
+- **2026-08-15** — Recommendations & Personalization Phase 0 (backend)
+  shipped against
+  `Afrizonemart_Recommendations_Personalization_Design_Spec.docx`. New
+  `modules/recommendations/` (schema/repository/service/controller/
+  routes) in `afrizonemart-api`: `GET /api/recommendations/similar`
+  (content-based weighted score — category/brand/origin/price-band +
+  quality tie-breaker — since there's no embedding space to reuse from
+  Search yet), `GET /api/recommendations/trending` (wraps the existing
+  view-count trending aggregator with a hard deliverability filter and
+  a quality-based pad), `POST /api/recommendations/click`. New
+  `RecommendationImpression` model (impression/click log loop, same
+  shape as `SearchQueryLog`). Migration
+  `20260815120000_recommendations_phase0` dry-run-validated against
+  prod (rolled back transaction) before merge — confirmed table
+  creation, insert, and read-back all succeed; the raw `prisma migrate
+  diff` output also surfaced pre-existing prod/schema drift (orphaned
+  `imageAlts` columns, stale search-index declarations) which was
+  deliberately excluded from this migration, not fixed here. Both new
+  endpoints live-tested against real production data via a local server
+  pointed at prod (`similar` returns same-category results correctly
+  ranked; `trending` returns a mix of real trending + rating-based pad
+  given the catalogue's low review-count today). Deliberately
+  substituted a transparent weighted-scoring retriever for the spec's
+  embedding-similarity retriever, same reasoning as Search's Postgres-
+  FTS-for-OpenSearch substitution. `tsc --noEmit` and `npm run build`
+  both clean. **Not yet done**: co-purchase/co-view (Phase 1),
+  personalization/user profiles (Phase 2), reorder + bandit exploration
+  (Phase 3), cross-channel (Phase 4), offline/online evaluation
+  harness, perf verification under real traffic. See the expanded
+  sub-checklist under "Product recommendation engine" above for full
+  phase-by-phase status.
 
 - **2026-08-11** — Search & Discovery Phase 0 (frontend) shipped:
   `afrizonemart-v2` #141 wires `SearchBar` (header autocomplete, mobile +
