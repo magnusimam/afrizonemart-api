@@ -67,7 +67,8 @@ revenue.
       PR(s): Phase 0 — `afrizonemart-api` #82 (backend) ·
       `afrizonemart-v2` #142 (web frontend) · `afrizonemart-mobile` #83
       (mobile frontend). Phase 1 — `afrizonemart-api` #83 (backend) ·
-      frontend PRs pending ·
+      `afrizonemart-v2` #143 (web frontend) · `afrizonemart-mobile` #84
+      (mobile frontend) ·
       Notes: Phase 0 shipped — "similar products" (content-based
       weighted score: category/brand/origin/price-band + quality
       tie-breaker, since there's no embedding space to reuse yet — see
@@ -158,6 +159,12 @@ revenue.
             from the Phase 0 "similar" placeholder to this.
       - [x] "Viewed also viewed" (co-view, distinct from content
             similarity) — `GET /api/recommendations/viewed-also-viewed`.
+            Wired at the API-client level on both web and mobile
+            (`fetchViewedAlsoViewed`) but deliberately not surfaced on
+            any page/screen yet — a PDP already carries "similar" +
+            "also bought" + origin/category cross-links, and a fourth
+            rail was judged more clutter than value for now. Available
+            whenever that judgement call changes.
       - [x] Graceful degradation (spec Section 3.1) — all three pad
             with the Phase 0 content-based `similarProducts` retriever
             when co-purchase/co-view data is thin. Confirmed necessary,
@@ -166,6 +173,19 @@ revenue.
             (multi-item orders are still rare this early) — without the
             pad, "Customers also bought" would render empty on most
             PDPs.
+      - [x] **Web frontend** (`afrizonemart-v2` #143) — new PDP section
+            "Customers Also Bought" alongside the existing "You May
+            Also Like"; cart page's cross-sell section switched from
+            the Phase 0 "similar" placeholder to the real
+            `frequently-bought-together`, seeded by every cart item.
+      - [~] **Mobile frontend** (`afrizonemart-mobile` #84) — PDP
+            "Customers also bought" rail added
+            (`PdpRelatedRail`'s new `alsoBoughtSlug` mode). Cart
+            cross-sell **not done** — the mobile cart screen has no
+            cross-sell section at all today, a pre-existing gap this
+            PR didn't introduce; `fetchFrequentlyBoughtTogether` exists
+            client-side ready to use once that screen section gets
+            built.
 
       _Phase 2 — Personalization (Weeks 9–14 per spec)_
       - [ ] User profile (affinities: category/brand/origin/price-band,
@@ -353,13 +373,14 @@ revenue.
       (`GET /api/search/autocomplete`); frontend dropdown not built.
       Design doc: `Afrizonemart_Search_Discovery_Design_Spec.docx` ·
       PR(s): same as Search ranking & relevance · Notes: see above.
-- [x] **Frequently bought together & bundling** (P1, shipped backend) —
+- [x] **Frequently bought together & bundling** (P1, shipped) —
       surfaces complementary items to raise average order value. Built
       together with Product recommendation engine above (System 2,
       same spec, Phase 1) — see that entry's sub-checklist. Also covers
-      "Customers also bought" and "Viewed also viewed", same PR.
-      Frontend (cart page cross-sell switch, PDP module additions) not
-      wired yet.
+      "Customers also bought" and "Viewed also viewed", same PRs.
+      Frontend: web done (cart cross-sell + new PDP section); mobile
+      PDP done, mobile cart cross-sell still doesn't exist as a screen
+      section (pre-existing gap).
       Design doc:
       `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
       PR(s): same as Product recommendation engine (Phase 1) · Notes:
@@ -533,6 +554,29 @@ _(Newest first. One entry per system when its spec lands or it ships —
 mirrors the `ARCHITECTURE_TRACKER.md` close-out convention: plain-English
 summary of what we built, when, and where the code lives.)_
 
+- **2026-08-15** — Recommendations & Personalization **Phase 1**
+  frontend shipped and Phase 1 fully deployed live. `afrizonemart-v2`
+  #143: new PDP "Customers Also Bought" section (distinct from the
+  existing content-based "You May Also Like"); cart page's cross-sell
+  switched from the Phase 0 "similar" placeholder to the real
+  "Frequently Bought Together", seeded by every cart item.
+  `afrizonemart-mobile` #84: new `PdpRelatedRail` `alsoBoughtSlug` mode
+  → "Customers also bought" rail. Mobile cart cross-sell **not
+  built** — the mobile cart screen has no cross-sell section of any
+  kind today, a pre-existing gap this work didn't introduce; the
+  client function exists ready to use once that screen section gets
+  built. `afrizonemart-api` #83 (Phase 1 backend) deployed to Railway
+  and verified live (`also-bought` returns real co-purchase-or-
+  fallback data in prod); `afrizonemart-v2` #143 verified live via
+  Vercel (PDP "Customers Also Bought" section confirmed rendering on
+  the live site); `afrizonemart-mobile` #84 pushed via EAS Update OTA
+  to the `production` branch (published, iOS + Android update IDs
+  confirmed) — no native changes, no app store resubmission needed.
+  "Viewed also viewed" intentionally not surfaced on any page/screen
+  on either platform — judged as PDP rail clutter for now, available
+  whenever that changes. `tsc --noEmit` and full production builds
+  clean on both frontends.
+
 - **2026-08-15** — Recommendations & Personalization Phase 0 merged and
   deployed live: `afrizonemart-api` #82 → Railway (verified
   `GET /api/recommendations/similar` and `/trending` responding with
@@ -565,12 +609,9 @@ summary of what we built, when, and where the code lives.)_
   server pointed at `DATABASE_PUBLIC_URL` (`viewed-also-viewed`
   returned real co-view pairs immediately; `also-bought` correctly
   returned empty before the fallback was added, confirmed against the
-  raw order rows, then correctly padded after). **Not yet done**:
-  frontend wiring on web/mobile (cart page switch from the Phase 0
-  "similar" placeholder to the real `frequently-bought-together`, new
-  PDP sections for "Customers also bought" / "Viewed also viewed"),
-  precomputed batch tables if live-join latency ever becomes a
-  problem, Phase 2+ (personalization, reorder, cross-channel).
+  raw order rows, then correctly padded after). **Not yet done at the
+  time this entry was written, since shipped** — frontend wiring: see
+  the next log entry.
 
 - **2026-08-15** — Recommendations & Personalization Phase 0 (web +
   mobile frontend) shipped. **Web** (`afrizonemart-v2` #142):
