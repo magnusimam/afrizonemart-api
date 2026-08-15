@@ -254,19 +254,55 @@ revenue.
             identity. Neither built yet — real follow-up work, not
             forgotten.
 
-      _Phase 3 — Advanced (Weeks 15–20 per spec)_
-      - [ ] Collaborative filtering / sequence models — not started.
+      _Phase 3 — Advanced (Weeks 15–20 per spec)_ — **paused, awaiting
+      Magnus.** 2026-08-15: discussed what "real" (not a SQL heuristic)
+      collaborative filtering and adaptive bandit exploration actually
+      require — both are legitimate infra/data decisions, not just more
+      code, same category as Search's still-open embedding-infra
+      question from Phase 0. Deliberately left unticked rather than
+      building a fake version of either. Revisit when Magnus decides to
+      invest, not before.
+      - [ ] Collaborative filtering / sequence models — **blocked on
+            two things, not started.** (1) Infra: needs a training
+            pipeline (e.g. ALS/matrix factorization via a Python job —
+            `implicit`/`lightfm`/Spark), somewhere to run it
+            periodically (no Python/ML worker exists in this stack
+            today — Node/Express on Railway only), and somewhere to
+            store the output (`pgvector` on the existing Postgres is
+            the lowest-lift option, or a dedicated vector store) — a
+            self-host-vs-managed call for Magnus, same shape as the
+            still-unresolved Search embedding-infra decision. (2) Data:
+            checked against real prod data in Phase 1 — most users
+            have exactly one order, so a matrix-factorization model
+            would be fitting noise today. The spec's own risk table
+            says this outright ("sparse interaction data early → weak
+            collaborative models → ramp CF with data"). Building the
+            infra now wouldn't have anything real to learn from yet.
       - [ ] Reorder / replenishment recommender (purchase-cycle
-            prediction) — not started. Flagged in the spec as
-            unusually valuable for Afrizonemart's FMCG/fast-delivery
-            model.
+            prediction) — not started, but **not blocked** — this is
+            plain SQL over `Order`/`OrderItem` history (per-user
+            per-product repeat interval), no new infra needed. Flagged
+            in the spec as unusually valuable for Afrizonemart's FMCG/
+            fast-delivery model. Will mostly return empty today (repeat
+            purchases are still rare in prod) but is ready to build
+            whenever prioritized — the delay here is scope/sequencing,
+            not a technical dependency like CF/bandit.
       - [ ] Bandit-based exploration + guaranteed new-item exposure
-            caps — not started (ties to "Cold-start recommendations"
-            below — Phase 0's content-bootstrap already gives new
-            products a fair shot via the similarity/trending
-            retrievers since neither requires interaction history, but
-            there's no explicit exploration budget or exposure
-            guarantee yet).
+            caps — **the guaranteed-exposure-cap half is unblocked**
+            (a deterministic slot-reservation rule for new/low-exposure
+            items, no ML needed — ties to "Cold-start recommendations"
+            below; Phase 0's content-bootstrap already gives new
+            products a fair shot via similarity/trending since neither
+            needs interaction history, but there's no explicit
+            exposure guarantee yet). **The adaptive-bandit half is
+            blocked on a missing prerequisite**: `POST /api/
+            recommendations/click` has existed since Phase 0 and has
+            never been called by any client on web or mobile — a
+            bandit with no reward signal isn't adaptive, it's random.
+            Wiring click-tracking is pure engineering (no infra
+            decision needed) but hasn't been prioritized across three
+            phases of "not yet done" notes now — worth doing on its
+            own regardless of what happens with CF/bandit.
 
       _Phase 4 — Cross-channel (ongoing per spec)_
       - [ ] Email/push recommendations — not started.
