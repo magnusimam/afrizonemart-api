@@ -68,17 +68,26 @@ revenue.
       `afrizonemart-v2` #142 (web frontend) · `afrizonemart-mobile` #83
       (mobile frontend). Phase 1 — `afrizonemart-api` #83 (backend) ·
       `afrizonemart-v2` #143 (web frontend) · `afrizonemart-mobile` #84
-      (mobile frontend) ·
+      (mobile frontend). Phase 2 — `afrizonemart-api` #85 (backend) ·
+      frontend PRs pending ·
       Notes: Phase 0 shipped — "similar products" (content-based
       weighted score: category/brand/origin/price-band + quality
       tie-breaker, since there's no embedding space to reuse yet — see
       the deliberate-substitution note in the sub-checklist) and
       "trending near you" (existing view-count trending + hard
       deliverability filter, wrapped in the new module). Phase 1
-      shipped (backend) — co-purchase ("customers also bought",
-      "frequently bought together") and co-view ("viewed also viewed"),
-      all three with graceful degradation to the Phase 0 content-based
-      retriever when interaction data is thin. See sub-checklist.
+      shipped — co-purchase ("customers also bought", "frequently
+      bought together") and co-view ("viewed also viewed"), all three
+      with graceful degradation to the Phase 0 content-based retriever
+      when interaction data is thin. Phase 2 shipped (backend) — live
+      user-affinity profile + a real "For You" feed
+      (`GET /api/recommendations/for-you`, degrades honestly to
+      popularity for guests/no-history via a `personalized` response
+      flag) and "Recently viewed" (`GET /api/recommendations/
+      recently-viewed`). Verified end-to-end against a real prod user
+      with order history: correctly inferred category/brand/origin
+      affinity from one purchase, ranked matching products top, and
+      excluded the already-purchased item. See sub-checklist.
 
       **Sub-checklist** (from the spec's Implementation Roadmap,
       Section 18 — phase timelines are relative effort, not dates):
@@ -188,16 +197,39 @@ revenue.
             built.
 
       _Phase 2 — Personalization (Weeks 9–14 per spec)_
-      - [ ] User profile (affinities: category/brand/origin/price-band,
-            recency, purchase cadence) — not started.
-      - [ ] Real "For You" home feed (ranked by *this* user's profile,
-            not just broad trending) — not started. Mobile's
-            `ForYouFeed` keeps its name/position for this future swap
-            per its own in-code note, but is trending-only today.
-      - [ ] "Recently viewed / continue" — not started (there is a
-            `ProductView` log to build it from once prioritized).
-      - [ ] Personalized ranking layer on top of candidate generation —
-            not started.
+      - [x] User profile (affinities: category/brand/origin) — computed
+            live at request time (`modules/recommendations/repository.ts:
+            getUserAffinities`), not a precomputed profile table (same
+            "defer batch precomputation until real volume needs it"
+            substitution as Phase 1's co-visitation). Purchases weight
+            3× a view, since a completed order is a much stronger
+            signal. **Price-band affinity and purchase cadence not
+            built** — cadence specifically belongs to the Phase 3
+            reorder recommender, not this profile.
+      - [x] Real "For You" home feed —
+            `GET /api/recommendations/for-you`. Guests/no-history users
+            get `EMPTY_AFFINITIES`, which the scoring query treats as a
+            no-op — pure popularity ranking, the same cold-start
+            degradation `trending` gives, reached via the
+            personalization-aware path so it's ready to sharpen the
+            moment there's history. Response includes a `personalized`
+            boolean so clients can show an honest "For You" vs.
+            "Trending" heading rather than always claiming
+            personalization that didn't happen. Already-purchased
+            products are excluded outright (repeat-purchase suggestion
+            is the Phase 3 reorder recommender's job).
+      - [x] "Recently viewed / continue" —
+            `GET /api/recommendations/recently-viewed`, built directly
+            from `ProductView` (userId when signed in, else sessionId).
+            Pure recency ordering, distinct products only, no ranking
+            beyond that per spec.
+      - [x] Personalized ranking layer — folded into `for-you`'s single
+            scoring query (affinity-match bonus + popularity/quality
+            term) rather than a separate ranking stage, same "ranking
+            is SQL scoring, not a separate model" pattern Phase 0/1
+            used. No learned ranker — Component 2's actual ML model is
+            explicitly out of scope until there's enough click/
+            conversion data to train on.
 
       _Phase 3 — Advanced (Weeks 15–20 per spec)_
       - [ ] Collaborative filtering / sequence models — not started.
@@ -245,14 +277,18 @@ revenue.
       Phase 1+ candidate generation can then reuse the same vector
       index Search would be building for itself, per the spec's own
       "reuse, don't rebuild" principle (Section 5.1/15).
-- [ ] **Personalized homepage / for-you ranking** (TBD) — per-user feed
-      ordered by browsing, purchase, and location history. Phase 2 of
-      System 2 above (Recommendations & Personalization) — see that
-      entry's sub-checklist. Not started; mobile's `ForYouFeed` is
-      trending-only today despite the name.
+- [x] **Personalized homepage / for-you ranking** (P2, shipped backend)
+      — per-user feed ordered by browsing, purchase, and location
+      history. Built together with Product recommendation engine above
+      (System 2, same spec, Phase 2) — see that entry's sub-checklist.
+      Frontend not wired yet — mobile's `ForYouFeed` is still calling
+      `trending`, not `for-you`, despite the name; that swap is the
+      natural next step.
       Design doc:
       `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
-      PR(s): _none yet_ · Notes: _none_
+      PR(s): same as Product recommendation engine (Phase 2) · Notes:
+      affinity profile computed live, not precomputed — see
+      sub-checklist substitution note.
 - [~] **Search ranking & relevance** (P1) — query understanding, typo
       tolerance, and multilingual matching across our 100+ supported
       languages. **System 1 of the algorithm roadmap** — full design in
@@ -553,6 +589,33 @@ time.
 _(Newest first. One entry per system when its spec lands or it ships —
 mirrors the `ARCHITECTURE_TRACKER.md` close-out convention: plain-English
 summary of what we built, when, and where the code lives.)_
+
+- **2026-08-15** — Recommendations & Personalization **Phase 2**
+  (backend) shipped: `modules/recommendations/repository.ts` gets
+  `getUserAffinities` (live category/brand/origin affinity from order +
+  view history, purchases weighted 3× a view), `getPurchasedProductIds`,
+  `forYou` (single scoring query: affinity-match bonus + popularity/
+  quality term — empty affinities are a no-op, so guests/no-history
+  users fall through to pure popularity automatically, no separate
+  branch), and `recentlyViewed` (pure recency, userId or sessionId).
+  Two new endpoints: `GET /api/recommendations/for-you` (response
+  includes a `personalized` boolean so clients show an honest heading)
+  and `GET /api/recommendations/recently-viewed`. Already-purchased
+  products are excluded from `for-you` outright — that's the Phase 3
+  reorder recommender's job, not this one's. `tsc --noEmit` and
+  `npm run build` both clean. Verified against real prod data two ways:
+  hit `for-you` with no auth over HTTP (`personalized: false`, clean
+  popularity fallback, confirming the empty-array `= ANY()` Postgres
+  parameterization doesn't error — a real risk with typed array binds
+  that was worth checking, not assumed safe); and called the affinity/
+  for-you functions directly for a real user with one order (a cookie
+  purchase) — correctly inferred `biscuits-cookies` category + `NG`
+  origin affinity, ranked matching products top, excluded the
+  purchased item. **Not yet done**: price-band affinity, purchase
+  cadence (belongs to Phase 3 reorder), frontend wiring on web/mobile
+  (mobile's `ForYouFeed` is the obvious next step — it's already named
+  and positioned for exactly this swap), Phase 3+ (collaborative
+  filtering, reorder, bandit exploration, cross-channel).
 
 - **2026-08-15** — Recommendations & Personalization **Phase 1**
   frontend shipped and Phase 1 fully deployed live. `afrizonemart-v2`

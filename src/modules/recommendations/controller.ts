@@ -2,7 +2,9 @@ import type { Response } from 'express';
 import type { AuthedRequest } from '@/middleware/auth';
 import {
   alsoBoughtQuerySchema,
+  forYouQuerySchema,
   frequentlyBoughtTogetherQuerySchema,
+  recentlyViewedQuerySchema,
   similarQuerySchema,
   trackClickBodySchema,
   trendingQuerySchema,
@@ -10,7 +12,9 @@ import {
 } from './schema';
 import {
   alsoBought,
+  forYou,
   frequentlyBoughtTogether,
+  recentlyViewedModule,
   similar,
   trackClick,
   trending,
@@ -56,5 +60,17 @@ export async function frequentlyBoughtTogetherHandler(req: AuthedRequest, res: R
 export async function viewedAlsoViewedHandler(req: AuthedRequest, res: Response): Promise<void> {
   const query = viewedAlsoViewedQuerySchema.parse(req.query);
   const result = await viewedAlsoViewedModule(query, { userId: req.user?.id });
+  res.json(result);
+}
+
+export async function forYouHandler(req: AuthedRequest, res: Response): Promise<void> {
+  const query = forYouQuerySchema.parse(req.query);
+  const result = await forYou(query, { userId: req.user?.id });
+  res.json(result);
+}
+
+export async function recentlyViewedHandler(req: AuthedRequest, res: Response): Promise<void> {
+  const query = recentlyViewedQuerySchema.parse(req.query);
+  const result = await recentlyViewedModule(query, { userId: req.user?.id });
   res.json(result);
 }

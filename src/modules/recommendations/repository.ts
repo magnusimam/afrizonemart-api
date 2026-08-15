@@ -273,6 +273,188 @@ export async function viewedAlsoViewed(
     .map((r) => ({ ...r, score: coCountById.get(r.id) ?? 0 }));
 }
 
+/// Purchases outrank views 3:1 — a completed order is a much stronger
+/// affinity signal than a dwell-time view. All-time (purchases aren't
+/// pruned); views are naturally bounded to the 90-day retention window
+/// `views/cron.ts` already enforces.
+const PURCHASE_AFFINITY_WEIGHT = 3;
+const VIEW_AFFINITY_WEIGHT = 1;
+const TOP_AFFINITY_N = 5;
+
+export interface UserAffinities {
+  categoryIds: string[];
+  brands: string[];
+  origins: string[];
+}
+
+const EMPTY_AFFINITIES: UserAffinities = { categoryIds: [], brands: [], origins: [] };
+
+/**
+ * Phase 2 — user profile, computed live from order + view history
+ * (spec Section 12: category/brand/origin affinity). Same "live query,
+ * not a precomputed profile table" substitution Phase 1 made for
+ * co-visitation — deferred until real user history volume justifies
+ * batch precomputation.
+ *
+ * Guests (no `userId`) get `EMPTY_AFFINITIES` — `forYou`'s scoring
+ * query treats an empty affinity array as a no-op (`= ANY('{}')` never
+ * matches), so it naturally falls through to pure popularity ranking
+ * without a separate code path. That IS the cold-start degradation
+ * spec Section 10.2 asks for, not a special case.
+ */
+export async function getUserAffinities(userId: string | undefined): Promise<UserAffinities> {
+  if (!userId) return EMPTY_AFFINITIES;
+
+  const [categoryRows, brandRows, originRows] = await Promise.all([
+    prisma.$queryRaw<Array<{ key: string; score: number }>>(Prisma.sql`
+      SELECT key, SUM(weight)::float AS score FROM (
+        SELECT p."categoryId" AS key, COUNT(*) * ${PURCHASE_AFFINITY_WEIGHT} AS weight
+        FROM "OrderItem" oi
+        JOIN "Product" p ON p.id = oi."productId"
+        JOIN "Order" o ON o.id = oi."orderId"
+        WHERE o."userId" = ${userId} AND o.status NOT IN (${COPURCHASE_EXCLUDED_STATUSES}) AND p."categoryId" IS NOT NULL
+        GROUP BY p."categoryId"
+        UNION ALL
+        SELECT p."categoryId" AS key, COUNT(*) * ${VIEW_AFFINITY_WEIGHT} AS weight
+        FROM "ProductView" pv
+        JOIN "Product" p ON p.id = pv."productId"
+        WHERE pv."userId" = ${userId} AND p."categoryId" IS NOT NULL
+        GROUP BY p."categoryId"
+      ) t
+      GROUP BY key ORDER BY score DESC LIMIT ${TOP_AFFINITY_N}
+    `),
+    prisma.$queryRaw<Array<{ key: string; score: number }>>(Prisma.sql`
+      SELECT key, SUM(weight)::float AS score FROM (
+        SELECT p."brand" AS key, COUNT(*) * ${PURCHASE_AFFINITY_WEIGHT} AS weight
+        FROM "OrderItem" oi
+        JOIN "Product" p ON p.id = oi."productId"
+        JOIN "Order" o ON o.id = oi."orderId"
+        WHERE o."userId" = ${userId} AND o.status NOT IN (${COPURCHASE_EXCLUDED_STATUSES}) AND p."brand" IS NOT NULL
+        GROUP BY p."brand"
+        UNION ALL
+        SELECT p."brand" AS key, COUNT(*) * ${VIEW_AFFINITY_WEIGHT} AS weight
+        FROM "ProductView" pv
+        JOIN "Product" p ON p.id = pv."productId"
+        WHERE pv."userId" = ${userId} AND p."brand" IS NOT NULL
+        GROUP BY p."brand"
+      ) t
+      GROUP BY key ORDER BY score DESC LIMIT ${TOP_AFFINITY_N}
+    `),
+    prisma.$queryRaw<Array<{ key: string; score: number }>>(Prisma.sql`
+      SELECT key, SUM(weight)::float AS score FROM (
+        SELECT p."origin" AS key, COUNT(*) * ${PURCHASE_AFFINITY_WEIGHT} AS weight
+        FROM "OrderItem" oi
+        JOIN "Product" p ON p.id = oi."productId"
+        JOIN "Order" o ON o.id = oi."orderId"
+        WHERE o."userId" = ${userId} AND o.status NOT IN (${COPURCHASE_EXCLUDED_STATUSES}) AND p."origin" IS NOT NULL
+        GROUP BY p."origin"
+        UNION ALL
+        SELECT p."origin" AS key, COUNT(*) * ${VIEW_AFFINITY_WEIGHT} AS weight
+        FROM "ProductView" pv
+        JOIN "Product" p ON p.id = pv."productId"
+        WHERE pv."userId" = ${userId} AND p."origin" IS NOT NULL
+        GROUP BY p."origin"
+      ) t
+      GROUP BY key ORDER BY score DESC LIMIT ${TOP_AFFINITY_N}
+    `),
+  ]);
+
+  return {
+    categoryIds: categoryRows.map((r) => r.key),
+    brands: brandRows.map((r) => r.key),
+    origins: originRows.map((r) => r.key),
+  };
+}
+
+/// Products a user has already bought (any non-excluded-status order)
+/// — Phase 2 "For You" excludes them outright rather than suggesting a
+/// repeat purchase; that's a distinct, purpose-built job for the
+/// Phase 3 reorder/replenishment recommender, not this module.
+export async function getPurchasedProductIds(userId: string | undefined): Promise<string[]> {
+  if (!userId) return [];
+  const rows = await prisma.$queryRaw<Array<{ productId: string }>>(Prisma.sql`
+    SELECT DISTINCT oi."productId"
+    FROM "OrderItem" oi
+    JOIN "Order" o ON o.id = oi."orderId"
+    WHERE o."userId" = ${userId} AND o.status NOT IN (${COPURCHASE_EXCLUDED_STATUSES})
+  `);
+  return rows.map((r) => r.productId);
+}
+
+/**
+ * Phase 2 — "For You" candidate generation + ranking in one query:
+ * affinity match (category/brand/origin) + a popularity/quality term,
+ * so a brand-new user with empty affinities (guest or no history yet)
+ * gets pure popularity ranking — the exact cold-start degradation
+ * spec Section 10.2 asks for, no separate branch needed.
+ */
+export async function forYou(
+  affinities: UserAffinities,
+  excludeIds: string[],
+  limit: number,
+  country: string | undefined,
+): Promise<RecommendationRow[]> {
+  const deliverability = deliverabilityFilter(country);
+  const exclude = excludeIds.length > 0 ? Prisma.sql`AND p.id NOT IN (${Prisma.join(excludeIds)})` : Prisma.empty;
+
+  const rows = await prisma.$queryRaw<RecommendationRow[]>(Prisma.sql`
+    SELECT ${SELECT_FIELDS},
+      (
+        (CASE WHEN p."categoryId" IS NOT NULL AND p."categoryId" = ANY(${affinities.categoryIds}::text[]) THEN 30 ELSE 0 END) +
+        (CASE WHEN p."brand" IS NOT NULL AND p."brand" = ANY(${affinities.brands}::text[]) THEN 20 ELSE 0 END) +
+        (CASE WHEN p."origin" IS NOT NULL AND p."origin" = ANY(${affinities.origins}::text[]) THEN 15 ELSE 0 END) +
+        (p."rating" * ln(p."reviewCount" + 2))
+      ) AS score
+    ${FROM_JOIN}
+    WHERE p."inStock" = true
+      ${exclude}
+      ${deliverability}
+    ORDER BY score DESC, p."createdAt" DESC
+    LIMIT ${limit}
+  `);
+  return rows;
+}
+
+/**
+ * Phase 2 — "Recently viewed / continue" (spec Section 11: Home/nav
+ * surface, pure user history — no ranking beyond recency). Distinct
+ * product ids only (a product viewed 5 times shows once, most-recent
+ * position), most recent first.
+ */
+export async function recentlyViewed(
+  userId: string | undefined,
+  sessionId: string | undefined,
+  limit: number,
+  country: string | undefined,
+): Promise<RecommendationRow[]> {
+  if (!userId && !sessionId) return [];
+  const deliverability = deliverabilityFilter(country);
+  const identity = userId
+    ? Prisma.sql`pv."userId" = ${userId}`
+    : Prisma.sql`pv."sessionId" = ${sessionId}`;
+
+  const recent = await prisma.$queryRaw<Array<{ productId: string; lastViewedAt: Date }>>(Prisma.sql`
+    SELECT pv."productId", MAX(pv."viewedAt") AS "lastViewedAt"
+    FROM "ProductView" pv
+    WHERE ${identity}
+    GROUP BY pv."productId"
+    ORDER BY "lastViewedAt" DESC
+    LIMIT ${limit}
+  `);
+  if (recent.length === 0) return [];
+
+  const ids = recent.map((r) => r.productId);
+  const rows = await prisma.$queryRaw<RecommendationRow[]>(Prisma.sql`
+    SELECT ${SELECT_FIELDS}, 0 AS score
+    ${FROM_JOIN}
+    WHERE p.id IN (${Prisma.join(ids)})
+      AND p."inStock" = true
+      ${deliverability}
+  `);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return ids.map((id) => byId.get(id)).filter((r): r is RecommendationRow => Boolean(r));
+}
+
 export async function getSeedProducts(slugs: string[]): Promise<SeedProduct[]> {
   const rows = await prisma.product.findMany({
     where: { slug: { in: slugs } },

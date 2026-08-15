@@ -3,16 +3,22 @@ import { HttpError } from '@/middleware/error-handler';
 import { getTrendingProductIds } from '@/modules/views/service';
 import type {
   AlsoBoughtQuery,
+  ForYouQuery,
   FrequentlyBoughtTogetherQuery,
+  RecentlyViewedQuery,
   SimilarQuery,
   TrendingQuery,
   ViewedAlsoViewedQuery,
 } from './schema';
 import {
   coPurchase,
+  forYou as forYouRetriever,
+  getPurchasedProductIds,
   getSeedProduct,
   getSeedProducts,
+  getUserAffinities,
   insertImpression,
+  recentlyViewed as recentlyViewedRetriever,
   recordImpressionClick,
   similarProducts,
   trendingNearYou,
@@ -70,13 +76,27 @@ function serializeRow(row: RecommendationRow) {
 }
 
 export interface RecommendationResult {
-  module: 'similar' | 'trending' | 'also-bought' | 'frequently-bought-together' | 'viewed-also-viewed';
+  module:
+    | 'similar'
+    | 'trending'
+    | 'also-bought'
+    | 'frequently-bought-together'
+    | 'viewed-also-viewed'
+    | 'for-you'
+    | 'recently-viewed';
   items: ReturnType<typeof serializeRow>[];
   /// Id of the RecommendationImpression row this call produced — the
   /// client passes it back on `POST /api/recommendations/click`.
   /// Null only if impression logging itself failed (never blocks
   /// serving the recommendations).
   impressionId: string | null;
+  /// `for-you` only: true when the ranking actually used the viewer's
+  /// affinities (signed-in with some order/view history). False means
+  /// it degraded to pure popularity — same underlying ranking `trending`
+  /// would give, just via the personalization-aware code path. Lets
+  /// the client pick "For You" vs. a "Trending" heading honestly
+  /// instead of always claiming personalization it didn't do.
+  personalized?: boolean;
 }
 
 async function logImpression(row: {
@@ -235,4 +255,62 @@ export async function viewedAlsoViewedModule(
   });
 
   return { module: 'viewed-also-viewed', items: rows.map(serializeRow), impressionId };
+}
+
+/// "For You" home feed (Phase 2) — ranks by the viewer's own
+/// category/brand/origin affinities (computed live from order + view
+/// history) plus a popularity/quality term. Guests and users with no
+/// history yet get `EMPTY_AFFINITIES`, which is a no-op in the scoring
+/// query — pure popularity ranking, the same cold-start degradation
+/// `trending` gives, just reached via the personalization-aware path
+/// so it's ready to sharpen the moment the viewer has history.
+/// Already-purchased products are excluded outright — recommending a
+/// repeat purchase is the Phase 3 reorder recommender's job, not this
+/// one's.
+export async function forYou(
+  query: ForYouQuery,
+  ctx: { userId?: string },
+): Promise<RecommendationResult> {
+  const [affinities, purchasedIds] = await Promise.all([
+    getUserAffinities(ctx.userId),
+    getPurchasedProductIds(ctx.userId),
+  ]);
+  const personalized =
+    affinities.categoryIds.length > 0 || affinities.brands.length > 0 || affinities.origins.length > 0;
+
+  const rows = await forYouRetriever(affinities, purchasedIds, query.limit, query.country);
+
+  const impressionId = await logImpression({
+    module: 'for-you',
+    surface: query.surface,
+    productIds: rows.map((r) => r.id),
+    userId: ctx.userId,
+    sessionId: query.sessionId,
+    country: query.country,
+  });
+
+  return { module: 'for-you', items: rows.map(serializeRow), impressionId, personalized };
+}
+
+/// "Recently viewed / continue" (Phase 2) — pure user history, no
+/// ranking beyond recency. Needs an identity (userId or sessionId) to
+/// mean anything; returns empty for a request with neither rather than
+/// erroring, so a caller that always sends this query doesn't need a
+/// special case for the truly-anonymous-first-visit moment.
+export async function recentlyViewedModule(
+  query: RecentlyViewedQuery,
+  ctx: { userId?: string },
+): Promise<RecommendationResult> {
+  const rows = await recentlyViewedRetriever(ctx.userId, query.sessionId, query.limit, query.country);
+
+  const impressionId = await logImpression({
+    module: 'recently-viewed',
+    surface: query.surface,
+    productIds: rows.map((r) => r.id),
+    userId: ctx.userId,
+    sessionId: query.sessionId,
+    country: query.country,
+  });
+
+  return { module: 'recently-viewed', items: rows.map(serializeRow), impressionId };
 }
