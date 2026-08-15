@@ -162,6 +162,125 @@ export async function trendingNearYou(
   return [...ordered, ...padRows];
 }
 
+/// Orders in these statuses never represent a real completed
+/// transaction — excluded from co-purchase mining so an abandoned
+/// PENDING_PAYMENT cart or a fully CANCELLED order can't inflate
+/// "bought together" signal for items nobody actually paid for.
+/// REFUNDED is intentionally included: the purchase pattern that led
+/// to the order still happened, refund or not.
+const COPURCHASE_EXCLUDED_STATUSES = Prisma.sql`'PENDING_PAYMENT', 'CANCELLED'`;
+
+/// Co-view mining is windowed to the same 90 days `views/cron.ts`
+/// already retains `ProductView` rows for — recent co-view behaviour
+/// is what matters, and it keeps the self-join bounded without
+/// needing a separate precomputed table yet.
+const COVIEW_WINDOW_DAYS = 90;
+
+/**
+ * Phase 1 — co-purchase retriever, shared by both "Customers also
+ * bought" (single seed, PDP) and "Frequently bought together" (multi-
+ * seed, cart) per spec Section 7/11: same underlying signal
+ * (item-to-item co-occurrence in `OrderItem`, self-joined on
+ * `orderId`), just seeded differently. Ranked by the number of
+ * distinct orders the pair appeared in together.
+ */
+export async function coPurchase(
+  seedProductIds: string[],
+  excludeIds: string[],
+  limit: number,
+  country: string | undefined,
+): Promise<RecommendationRow[]> {
+  if (seedProductIds.length === 0) return [];
+  const deliverability = deliverabilityFilter(country);
+  const excluded = Array.from(new Set([...seedProductIds, ...excludeIds]));
+
+  const pairs = await prisma.$queryRaw<Array<{ productId: string; coCount: bigint }>>(Prisma.sql`
+    SELECT oi2."productId" AS "productId", COUNT(DISTINCT oi1."orderId")::bigint AS "coCount"
+    FROM "OrderItem" oi1
+    JOIN "OrderItem" oi2 ON oi2."orderId" = oi1."orderId" AND oi2."productId" != oi1."productId"
+    JOIN "Order" o ON o.id = oi1."orderId"
+    WHERE oi1."productId" IN (${Prisma.join(seedProductIds)})
+      AND oi2."productId" NOT IN (${Prisma.join(excluded)})
+      AND o.status NOT IN (${COPURCHASE_EXCLUDED_STATUSES})
+    GROUP BY oi2."productId"
+    ORDER BY "coCount" DESC
+    LIMIT ${limit}
+  `);
+  if (pairs.length === 0) return [];
+
+  const ids = pairs.map((p) => p.productId);
+  const rows = await prisma.$queryRaw<RecommendationRow[]>(Prisma.sql`
+    SELECT ${SELECT_FIELDS}, 0 AS score
+    ${FROM_JOIN}
+    WHERE p.id IN (${Prisma.join(ids)})
+      AND p."inStock" = true
+      ${deliverability}
+  `);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const coCountById = new Map(pairs.map((p) => [p.productId, Number(p.coCount)]));
+  return ids
+    .map((id) => byId.get(id))
+    .filter((r): r is RecommendationRow => Boolean(r))
+    .map((r) => ({ ...r, score: coCountById.get(r.id) ?? 0 }));
+}
+
+/**
+ * Phase 1 — "Viewed also viewed" (spec Section 11): co-view retriever,
+ * distinct from `coPurchase` — pairs of products viewed within the
+ * same anonymous session (or by the same signed-in user when there's
+ * no session id) inside the last `COVIEW_WINDOW_DAYS` days.
+ */
+export async function viewedAlsoViewed(
+  seedProductId: string,
+  limit: number,
+  country: string | undefined,
+): Promise<RecommendationRow[]> {
+  const deliverability = deliverabilityFilter(country);
+  const since = new Date(Date.now() - COVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+  const pairs = await prisma.$queryRaw<Array<{ productId: string; coCount: bigint }>>(Prisma.sql`
+    SELECT pv2."productId" AS "productId", COUNT(DISTINCT COALESCE(pv1."sessionId", pv1."userId"))::bigint AS "coCount"
+    FROM "ProductView" pv1
+    JOIN "ProductView" pv2
+      ON pv2."productId" != pv1."productId"
+      AND pv2."viewedAt" >= ${since}
+      AND (
+        (pv1."sessionId" IS NOT NULL AND pv1."sessionId" = pv2."sessionId")
+        OR (pv1."sessionId" IS NULL AND pv1."userId" IS NOT NULL AND pv1."userId" = pv2."userId")
+      )
+    WHERE pv1."productId" = ${seedProductId}
+      AND pv1."viewedAt" >= ${since}
+    GROUP BY pv2."productId"
+    ORDER BY "coCount" DESC
+    LIMIT ${limit}
+  `);
+  if (pairs.length === 0) return [];
+
+  const ids = pairs.map((p) => p.productId);
+  const rows = await prisma.$queryRaw<RecommendationRow[]>(Prisma.sql`
+    SELECT ${SELECT_FIELDS}, 0 AS score
+    ${FROM_JOIN}
+    WHERE p.id IN (${Prisma.join(ids)})
+      AND p.id != ${seedProductId}
+      AND p."inStock" = true
+      ${deliverability}
+  `);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const coCountById = new Map(pairs.map((p) => [p.productId, Number(p.coCount)]));
+  return ids
+    .map((id) => byId.get(id))
+    .filter((r): r is RecommendationRow => Boolean(r))
+    .map((r) => ({ ...r, score: coCountById.get(r.id) ?? 0 }));
+}
+
+export async function getSeedProducts(slugs: string[]): Promise<SeedProduct[]> {
+  const rows = await prisma.product.findMany({
+    where: { slug: { in: slugs } },
+    select: { id: true, categoryId: true, brand: true, origin: true, price: true },
+  });
+  return rows;
+}
+
 export async function insertImpression(row: {
   module: string;
   surface: string;

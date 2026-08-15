@@ -1,7 +1,21 @@
 import type { Response } from 'express';
 import type { AuthedRequest } from '@/middleware/auth';
-import { similarQuerySchema, trackClickBodySchema, trendingQuerySchema } from './schema';
-import { similar, trackClick, trending } from './service';
+import {
+  alsoBoughtQuerySchema,
+  frequentlyBoughtTogetherQuerySchema,
+  similarQuerySchema,
+  trackClickBodySchema,
+  trendingQuerySchema,
+  viewedAlsoViewedQuerySchema,
+} from './schema';
+import {
+  alsoBought,
+  frequentlyBoughtTogether,
+  similar,
+  trackClick,
+  trending,
+  viewedAlsoViewedModule,
+} from './service';
 
 /**
  * HTTP layer for the Recommendations module (Rule B1 — API-First).
@@ -25,4 +39,22 @@ export async function trackClickHandler(req: AuthedRequest, res: Response): Prom
   const body = trackClickBodySchema.parse(req.body);
   await trackClick(body.impressionId, body.productId);
   res.status(204).end();
+}
+
+export async function alsoBoughtHandler(req: AuthedRequest, res: Response): Promise<void> {
+  const query = alsoBoughtQuerySchema.parse(req.query);
+  const result = await alsoBought(query, { userId: req.user?.id });
+  res.json(result);
+}
+
+export async function frequentlyBoughtTogetherHandler(req: AuthedRequest, res: Response): Promise<void> {
+  const query = frequentlyBoughtTogetherQuerySchema.parse(req.query);
+  const result = await frequentlyBoughtTogether(query, { userId: req.user?.id });
+  res.json(result);
+}
+
+export async function viewedAlsoViewedHandler(req: AuthedRequest, res: Response): Promise<void> {
+  const query = viewedAlsoViewedQuerySchema.parse(req.query);
+  const result = await viewedAlsoViewedModule(query, { userId: req.user?.id });
+  res.json(result);
 }
