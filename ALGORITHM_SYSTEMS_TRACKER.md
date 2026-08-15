@@ -66,8 +66,8 @@ revenue.
       `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
       PR(s): Phase 0 — `afrizonemart-api` #82 (backend) ·
       `afrizonemart-v2` #142 (web frontend) · `afrizonemart-mobile` #83
-      (mobile frontend). Phase 1 — `afrizonemart-api` #_pending_
-      (backend) · frontend PRs pending ·
+      (mobile frontend). Phase 1 — `afrizonemart-api` #83 (backend) ·
+      frontend PRs pending ·
       Notes: Phase 0 shipped — "similar products" (content-based
       weighted score: category/brand/origin/price-band + quality
       tie-breaker, since there's no embedding space to reuse yet — see
