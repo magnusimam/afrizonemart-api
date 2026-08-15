@@ -69,7 +69,8 @@ revenue.
       (mobile frontend). Phase 1 — `afrizonemart-api` #83 (backend) ·
       `afrizonemart-v2` #143 (web frontend) · `afrizonemart-mobile` #84
       (mobile frontend). Phase 2 — `afrizonemart-api` #85 (backend) ·
-      frontend PRs pending ·
+      `afrizonemart-mobile` #85 (mobile frontend, web frontend not
+      started — see sub-checklist for why) ·
       Notes: Phase 0 shipped — "similar products" (content-based
       weighted score: category/brand/origin/price-band + quality
       tie-breaker, since there's no embedding space to reuse yet — see
@@ -230,6 +231,28 @@ revenue.
             used. No learned ranker — Component 2's actual ML model is
             explicitly out of scope until there's enough click/
             conversion data to train on.
+      - [x] **Mobile frontend** (`afrizonemart-mobile` #85) —
+            `ForYouFeed` swapped from Phase 0 trending to the real
+            `for-you`; new "Continue Browsing" rail
+            (`RecentlyViewedRail`) added to the admin-configurable home
+            layout (`recently_viewed` section type). Recommendation
+            calls now optionally attach a Bearer token when signed in.
+      - [ ] **Web frontend** — not started, and not a simple swap like
+            mobile's: web's Home page is a Server Component (SSR), and
+            both the signed-in access token (in-memory only per audit
+            C2, never reaches the server) and the anonymous analytics
+            session id (`localStorage`-only, `getOrCreateSessionId()`
+            explicitly returns null server-side) are client-only
+            concepts today. Calling `for-you`/`recently-viewed` from
+            web's SSR home fetch would only ever see a guest with no
+            identity — same output as `trending`, just extra
+            indirection, so it wasn't worth faking the swap. Actually
+            personalizing web's home needs one of: converting the
+            relevant home section to a client component that fetches
+            after hydration (mirrors how mobile already works), or a
+            cookie-based session/token bridge so SSR can resolve
+            identity. Neither built yet — real follow-up work, not
+            forgotten.
 
       _Phase 3 — Advanced (Weeks 15–20 per spec)_
       - [ ] Collaborative filtering / sequence models — not started.
@@ -277,13 +300,12 @@ revenue.
       Phase 1+ candidate generation can then reuse the same vector
       index Search would be building for itself, per the spec's own
       "reuse, don't rebuild" principle (Section 5.1/15).
-- [x] **Personalized homepage / for-you ranking** (P2, shipped backend)
-      — per-user feed ordered by browsing, purchase, and location
+- [x] **Personalized homepage / for-you ranking** (P2, shipped) —
+      per-user feed ordered by browsing, purchase, and location
       history. Built together with Product recommendation engine above
       (System 2, same spec, Phase 2) — see that entry's sub-checklist.
-      Frontend not wired yet — mobile's `ForYouFeed` is still calling
-      `trending`, not `for-you`, despite the name; that swap is the
-      natural next step.
+      Mobile shipped (`ForYouFeed` now calls the real `for-you`); web
+      not started — SSR identity gap, see sub-checklist.
       Design doc:
       `Afrizonemart_Recommendations_Personalization_Design_Spec.docx` ·
       PR(s): same as Product recommendation engine (Phase 2) · Notes:
@@ -589,6 +611,30 @@ time.
 _(Newest first. One entry per system when its spec lands or it ships —
 mirrors the `ARCHITECTURE_TRACKER.md` close-out convention: plain-English
 summary of what we built, when, and where the code lives.)_
+
+- **2026-08-15** — Recommendations & Personalization **Phase 2**
+  (mobile frontend) shipped and deployed live. `afrizonemart-mobile`
+  #85: `ForYouFeed` swapped from Phase 0 `trending` to the real
+  `for-you` — the section finally lives up to its name for signed-in
+  viewers with history. New "Continue Browsing" rail
+  (`RecentlyViewedRail`) calling `recently-viewed`, resolved via the
+  auth token when signed in or the AsyncStorage session id as a guest;
+  wired into the admin-configurable home layout as a new
+  `recently_viewed` section type. Recommendation calls now optionally
+  attach a Bearer token when available. Pushed via EAS Update OTA to
+  the `production` branch — no native changes, no app store
+  resubmission. `afrizonemart-api` #85 (Phase 2 backend) confirmed live
+  on Railway (`for-you`/`recently-viewed` both responding with real
+  data in prod). **Web frontend deliberately not attempted**: web's
+  Home page is Server-Component-rendered, and neither the signed-in
+  access token (in-memory only, never reaches the server per the audit
+  C2 note) nor the anonymous session id (`localStorage`-only) are
+  visible during SSR — calling `for-you` from web's server-rendered
+  home fetch would only ever see a guest, identical output to
+  `trending` with extra indirection. Real personalization on web needs
+  either a client-rendered home section or a cookie-based identity
+  bridge into SSR — neither built, tracked as a real follow-up rather
+  than faked. `tsc --noEmit -p .` clean.
 
 - **2026-08-15** — Recommendations & Personalization **Phase 2**
   (backend) shipped: `modules/recommendations/repository.ts` gets
