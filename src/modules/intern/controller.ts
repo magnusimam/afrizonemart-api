@@ -61,12 +61,14 @@ export async function submitImagesHandler(req: Request, res: Response): Promise<
 
 export async function adminBulkAssignHandler(req: Request, res: Response): Promise<void> {
   const body = bulkAssignBodySchema.parse(req.body);
-  res.json(await bulkAssign(body));
+  const actorUserId = (req as AuthedReq).user?.id ?? null;
+  res.json(await bulkAssign(body, actorUserId));
 }
 
 export async function adminReassignHandler(req: Request, res: Response): Promise<void> {
   const body = reassignBodySchema.parse(req.body);
-  res.json(await reassign(body));
+  const actorUserId = (req as AuthedReq).user?.id ?? null;
+  res.json(await reassign(body, actorUserId));
 }
 
 export async function adminGetProgressHandler(_req: Request, res: Response): Promise<void> {
