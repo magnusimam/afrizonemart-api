@@ -429,11 +429,54 @@ model SearchQueryLog {
   /// First product (if any) the searcher clicked from this query's
   /// results. Filled in by a follow-up call, not at search time.
   clickedProductId String?
+  /// Search Phase 1 — end-to-end handler latency in ms, measured around
+  /// the full pipeline (query understanding → retrieval → ranking).
+  /// Feeds the p95 latency baseline in `GET /api/admin/search/stats` —
+  /// see ALGORITHM_SYSTEMS_TRACKER.md, "p95 < 200ms" checklist item.
+  durationMs       Int?
+  /// Search Phase 1 — coarse Unicode-script classification of the raw
+  /// query (e.g. "latin", "arabic", "cyrillic", "cjk"), not a full
+  /// language ID. Deliberate substitution for the spec's "language
+  /// detection" line: word-level language ID (e.g. franc) is unreliable
+  /// on 1-3 word queries, and 'simple' tsvector config doesn't switch
+  /// per-language analyzers anyway (see Phase-0 note above) — script
+  /// is the honest signal we can actually act on today. See
+  /// `modules/search/script-detect.ts`.
+  script           String?
+  /// True when this query's results came from the trigram
+  /// zero-result-recovery path rather than the primary lexical match.
+  /// Feeds the admin search-stats dashboard's fallback rate.
+  usedFallback     Boolean  @default(false)
+  /// True when a "did you mean" reformulation was actually surfaced
+  /// to the searcher (i.e. a query-log-mined candidate existed AND
+  /// beat this query's live result count) — narrower than "results
+  /// were thin," which `resultCount` already tells you.
+  didYouMeanShown  Boolean  @default(false)
   createdAt        DateTime @default(now())
 
   @@index([normalizedQuery, createdAt])
   @@index([userId, createdAt])
   @@index([resultCount, createdAt])
+}
+
+/// Search Phase 1 — seed synonym dictionary (spec Section 6.1 / "seed
+/// synonym dictionary"). Each row is a synonym GROUP: `canonical` plus
+/// its `terms` (lowercase, normalized the same way as
+/// `service.ts:normalizeQuery`). Query-time expansion (see
+/// `repository.ts:buildTsQuery`) OR-groups every term sharing a group
+/// with a matched query word, so "garri" and "gari" retrieve the same
+/// products. Deliberately flat/manual for Phase 1 — no NLP-mined
+/// expansion yet.
+model SearchSynonym {
+  id        String   @id @default(cuid())
+  canonical String
+  /// Includes `canonical` itself, so a lookup by any member returns
+  /// the full group in one query.
+  terms     String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([terms], type: Gin)
 }
 
 /// 2026-06-08 — Afrizonemart Wrap. Annual personalised
