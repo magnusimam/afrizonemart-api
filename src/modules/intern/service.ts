@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
+import { logAudit } from '@/modules/audit/service';
 import { deleteImagesByUrl } from '@/modules/uploads/cleanup';
 import type {
   BulkAssignBody,
@@ -178,6 +179,14 @@ export async function claimFromUnassignedPool(internId: string, body: ClaimQueue
     where: { id: { in: targetIds }, assignedInternId: null },
     data: { assignedInternId: internId },
   });
+
+  void logAudit({
+    actorUserId: internId,
+    entityType: 'intern_assignment',
+    action: 'intern.claim_from_pool',
+    changes: { requestedCount: body.count, claimed: r.count, productIds: targetIds },
+  });
+
   return { claimed: r.count };
 }
 
@@ -413,7 +422,7 @@ export async function getInternSelfStats(internId: string) {
  * assigned are left untouched (we only ever write where current
  * assignment is null).
  */
-export async function bulkAssign(body: BulkAssignBody) {
+export async function bulkAssign(body: BulkAssignBody, actorUserId: string | null) {
   // Validate every intern actually exists and has STAFF / ADMIN role.
   const interns = await prisma.user.findMany({
     where: { id: { in: body.internIds } },
@@ -436,13 +445,22 @@ export async function bulkAssign(body: BulkAssignBody) {
     orderBy: { createdAt: 'asc' },
     select: { id: true, images: true, category: { select: { minImages: true } } },
   });
+  /// Products that already clear their category's image threshold —
+  /// "all-unassigned" deliberately includes these (reshoots, brand-
+  /// logo backfills on otherwise-complete products), but a sweep that
+  /// catches a lot of already-done work is worth flagging rather than
+  /// silently handing it out — see ALGORITHM_SYSTEMS_TRACKER.md-
+  /// adjacent intern-workflow audit, 2026-08-17.
+  const alreadyImaged = new Set(
+    candidates.filter((p) => p.images.length >= (p.category?.minImages ?? 3)).map((p) => p.id),
+  );
   const filtered = candidates
     .filter((p) =>
       body.scope === 'all-unassigned' ? true : p.images.length < (p.category?.minImages ?? 3),
     )
     .map((p) => p.id);
 
-  if (filtered.length === 0) return { assigned: 0, perIntern: {} };
+  if (filtered.length === 0) return { assigned: 0, perIntern: {}, alreadyImagedCount: 0 };
 
   // Round-robin assign. We do this in batches of (n_interns × 25)
   // updates per transaction so a 900-product split runs in under 40
@@ -463,13 +481,35 @@ export async function bulkAssign(body: BulkAssignBody) {
     );
   }
 
+  const alreadyImagedCount = filtered.filter((id) => alreadyImaged.has(id)).length;
+
+  void logAudit({
+    actorUserId,
+    entityType: 'intern_assignment',
+    action: 'intern.bulk_assign',
+    changes: {
+      scope: body.scope,
+      internIds: body.internIds,
+      payRate: body.payRate,
+      assigned: filtered.length,
+      perIntern: Object.fromEntries(perIntern),
+      alreadyImagedCount,
+    },
+  });
+
   return {
     assigned: filtered.length,
     perIntern: Object.fromEntries(perIntern),
+    /// Count of the just-assigned products that already had enough
+    /// approved images before this sweep. Non-zero under
+    /// "all-unassigned" scope isn't an error (that scope exists for
+    /// reshoots/backfills) — it's a signal for whoever ran this to
+    /// double-check that was intentional.
+    alreadyImagedCount,
   };
 }
 
-export async function reassign(body: ReassignBody) {
+export async function reassign(body: ReassignBody, actorUserId: string | null) {
   let productIds = body.productIds ?? [];
 
   if (productIds.length === 0) {
@@ -491,7 +531,22 @@ export async function reassign(body: ReassignBody) {
     productIds = rows.map((r) => r.id);
   }
 
-  if (productIds.length === 0) return { moved: 0, perIntern: {}, returnedToPool: 0 };
+  if (productIds.length === 0) {
+    return { moved: 0, perIntern: {}, returnedToPool: 0, alreadyImagedCount: 0 };
+  }
+
+  /// Same "already done" signal as `bulkAssign` — `mode: 'all'` (or an
+  /// explicit `productIds` list) can move products that already have
+  /// enough approved images, since neither path filters on image
+  /// count. Not blocked (an admin may genuinely want to move
+  /// in-progress-but-complete work for reshoots), just surfaced.
+  const movedProducts = await prisma.product.findMany({
+    where: { id: { in: productIds } },
+    select: { id: true, images: true, category: { select: { minImages: true } } },
+  });
+  const alreadyImagedCount = movedProducts.filter(
+    (p) => p.images.length >= (p.category?.minImages ?? 3),
+  ).length;
 
   if (!body.toInternIds || body.toInternIds.length === 0) {
     // Send back to the unassigned pool.
@@ -499,7 +554,13 @@ export async function reassign(body: ReassignBody) {
       where: { id: { in: productIds } },
       data: { assignedInternId: null },
     });
-    return { moved: r.count, perIntern: {}, returnedToPool: r.count };
+    void logAudit({
+      actorUserId,
+      entityType: 'intern_assignment',
+      action: 'intern.reassign_to_pool',
+      changes: { fromInternId: body.fromInternId, mode: body.mode, moved: r.count, alreadyImagedCount },
+    });
+    return { moved: r.count, perIntern: {}, returnedToPool: r.count, alreadyImagedCount };
   }
 
   // Round-robin across the destination interns.
@@ -516,10 +577,25 @@ export async function reassign(body: ReassignBody) {
     }),
   );
 
+  void logAudit({
+    actorUserId,
+    entityType: 'intern_assignment',
+    action: 'intern.reassign',
+    changes: {
+      fromInternId: body.fromInternId,
+      mode: body.mode,
+      toInternIds: body.toInternIds,
+      moved: productIds.length,
+      perIntern: Object.fromEntries(perIntern),
+      alreadyImagedCount,
+    },
+  });
+
   return {
     moved: productIds.length,
     perIntern: Object.fromEntries(perIntern),
     returnedToPool: 0,
+    alreadyImagedCount,
   };
 }
 
