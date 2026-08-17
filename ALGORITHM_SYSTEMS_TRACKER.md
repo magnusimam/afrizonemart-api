@@ -354,11 +354,11 @@ revenue.
       2026-08-11). Also covers Autocomplete (below) — same spec, same
       build, Section 12.
       Design doc: `Afrizonemart_Search_Discovery_Design_Spec.docx` ·
-      PR(s): `afrizonemart-api` #79, #80 (Phase 0 backend), #<TBD>
+      PR(s): `afrizonemart-api` #79, #80 (Phase 0 backend), #88
       (Phase 1 backend — migration `20260817120000_search_phase1_
       query_understanding`) · `afrizonemart-v2` #141 (Phase 0
-      frontend), #<TBD> (Phase 0/1 facets + click tracking + did-you-
-      mean) · `afrizonemart-mobile` #<TBD> (real search API wiring —
+      frontend), #148 (Phase 0/1 facets + click tracking + did-you-
+      mean) · `afrizonemart-mobile` #86 (real search API wiring —
       was previously calling the naive `/api/products?q=` listing) ·
       Notes: Phase 0 shipped as **Postgres-native** full-text search
       (generated `tsvector` + GIN index + `pg_trgm`), not OpenSearch —
