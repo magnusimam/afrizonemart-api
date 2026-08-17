@@ -40,6 +40,7 @@ import { adminTradeRoutes } from '@/modules/suppliers/admin.trade.routes';
 import { adminDocumentSubmissionRoutes } from '@/modules/document-submissions/admin.routes';
 import { adminInternPayoutRoutes } from '@/modules/payouts/routes';
 import { adminLoyaltyRoutes } from '@/modules/loyalty/admin.routes';
+import { adminSearchRoutes } from '@/modules/search/admin.routes';
 
 /**
  * Composes every domain module's admin surface under a single auth gate.
@@ -98,6 +99,7 @@ adminRouter.use('/reviews', requireCapability('reviews.moderate'), adminReviewRo
 /// admin (categories heroes, landing pages, etc.).
 adminRouter.use('/wrap', requireCapability('content.write'), adminWrapRoutes);
 adminRouter.use('/views', requireCapability('analytics.read'), adminViewRoutes);
+adminRouter.use('/search', requireCapability('analytics.read'), adminSearchRoutes);
 adminRouter.use('/orders', requireCapability('orders.read'), adminOrderRoutes);
 adminRouter.use('/customers', requireCapability('customers.read'), adminCustomerRoutes);
 // Staff management — ADMIN-only inner gate. Even if a STAFF user

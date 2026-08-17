@@ -354,8 +354,12 @@ revenue.
       2026-08-11). Also covers Autocomplete (below) — same spec, same
       build, Section 12.
       Design doc: `Afrizonemart_Search_Discovery_Design_Spec.docx` ·
-      PR(s): `afrizonemart-api` #79, #80 (backend) ·
-      `afrizonemart-v2` #141 (frontend) ·
+      PR(s): `afrizonemart-api` #79, #80 (Phase 0 backend), #<TBD>
+      (Phase 1 backend — migration `20260817120000_search_phase1_
+      query_understanding`) · `afrizonemart-v2` #141 (Phase 0
+      frontend), #<TBD> (Phase 0/1 facets + click tracking + did-you-
+      mean) · `afrizonemart-mobile` #<TBD> (real search API wiring —
+      was previously calling the naive `/api/products?q=` listing) ·
       Notes: Phase 0 shipped as **Postgres-native** full-text search
       (generated `tsvector` + GIN index + `pg_trgm`), not OpenSearch —
       deliberate substitution to ship without provisioning a new
@@ -370,7 +374,8 @@ revenue.
             (field-weighted: name A / brand B / shortDescription C /
             description D, `'simple'` config) + GIN index. Migration
             `20260811120000_search_phase0`. *(Substitutes the spec's
-            "search engine cluster" line — see note above.)*
+            "search engine cluster" line — see note above.)* Diacritic
+            folding added Phase 1 — see below.
       - [x] Event-driven catalogue sync — `product.created` /
             `product.updated` / `product.deleted` events added to
             `eventBus` and emitted from every admin product write path
@@ -380,46 +385,103 @@ revenue.
             live dependency.
       - [x] BM25-equivalent keyword search — `ts_rank_cd` over the
             tsvector, `modules/search/repository.ts:lexicalSearch`.
-      - [ ] Facets — filtering is wired (reuses the exact shop-filter
-            contract: category+descendants, origin, price, rating,
-            inStock, onSale, shipsToMe/country) but there's no
-            computed facet-*count* aggregation (e.g. "Electronics
-            (42)") yet. Not started.
+      - [x] Facets — `repository.ts:computeFacets`, origin/rating/
+            inStock/onSale counts (each excludes its own filter — the
+            "if I also picked this" convention). Category facet NOT
+            built: `/search`'s `FiltersSidebar` doesn't render a
+            category group at all today (it's search-global, not
+            category-scoped), so there was nothing to attach counts
+            to — revisit if/when a category selector is added to
+            search. Wired into `GET /api/search` response's `facets`
+            field and rendered in `FiltersSidebar` (web, 2026-08-17).
       - [x] Basic autocomplete — query completions (mined from
             `SearchQueryLog`) + product/category jumps (trigram +
             prefix match), `GET /api/search/autocomplete`.
       - [x] Query logging — `SearchQueryLog` model, written on every
-            search; `POST /api/search/click` for downstream CTR once
-            the frontend wires it in.
-      - [x] **Frontend** (`afrizonemart-v2` #141) — header `SearchBar`
-            (mobile + desktop) with a debounced autocomplete dropdown,
-            SafeBoundary-wrapped with a plain-form fallback; `/search`
-            now calls the real `GET /api/search` (was the old naive
-            `/api/products?q=` ILIKE match) and forwards the same
-            filter/sort params `/shop` reads — `FiltersSidebar`/
-            `ShopToolbar` were already rendered there but silently
-            non-functional; now wired. Verified against production
-            data (real ranked results, typo fallback, price sort) via
-            a local dev server pointed at `api.afrizonemart.com` —
-            Chrome browser tools weren't available this session to
-            click-test the dropdown interactively, so that's still
-            outstanding. Click-through tracking UI
-            (`POST /api/search/click` exists server-side) and facet
-            counts are not wired.
-      - [ ] p95 < 200ms verified under real load — not yet measured
-            (no production traffic on the new endpoint yet).
-      - [ ] Zero-result rate < 5% baseline — nothing to baseline until
-            the frontend sends real traffic.
+            search; `POST /api/search/click` for downstream CTR, now
+            wired on both web (`SearchResultCard`) and mobile
+            (`SearchScreen`, 2026-08-17).
+      - [x] **Frontend** (`afrizonemart-v2` #141, updated 2026-08-17) —
+            header `SearchBar` (mobile + desktop) with a debounced
+            autocomplete dropdown, SafeBoundary-wrapped with a
+            plain-form fallback; `/search` calls the real
+            `GET /api/search` and forwards the same filter/sort params
+            `/shop` reads. Click-through tracking now wired
+            (`SearchResultCard` fires `POST /api/search/click` on
+            result tap) and facet counts render in `FiltersSidebar`.
+            Autocomplete dropdown itself still hasn't been
+            interactively click-tested in a real browser session (no
+            Chrome tooling available in the sessions that touched
+            search so far) — functionally wired, just unverified by
+            hand.
+      - [x] **Mobile parity** (`afrizonemart-mobile`, 2026-08-17) — was
+            a real gap, not just missing UI polish: `SearchScreen` was
+            calling `/api/products?q=` (naive ILIKE, no ranking, no
+            typo tolerance) the whole time Phase 0 was "shipped" on
+            web. New `fetchSearch`/`trackSearchClick` in `lib/api.ts`,
+            `useSearch` hook, `searchItemToCard` adapter — `SearchScreen`
+            now calls the real `GET /api/search`, tracks clicks, and
+            shows a tap-to-apply "did you mean" row. Facet counts not
+            surfaced on mobile (no filter sidebar there yet) — same
+            gap `/shop`-equivalent mobile screens have generally.
+      - [ ] p95 < 200ms verified under real load — still not measured;
+            what changed 2026-08-17 is the instrumentation to actually
+            check it exists now (`SearchQueryLog.durationMs` +
+            `GET /api/admin/search/stats`, p50/p95/p99 via
+            `percentile_cont`). Verification is blocked on real
+            traffic, not on missing tooling.
+      - [ ] Zero-result rate < 5% baseline — same as above: the
+            `/api/admin/search/stats` endpoint now reports it
+            (`zeroResultRate`, plus top zero-result queries so gaps
+            are actionable), still nothing to baseline until traffic
+            exists.
 
       _Phase 1 — Query understanding (Weeks 4–8 per spec)_
-      - [x] Normalization (partial) — NFC, trim, lowercase, whitespace
-            collapse (`service.ts:normalizeQuery`). Diacritic folding
-            not yet explicit (relies on `'simple'` tsvector config).
-      - [ ] Language detection — not started.
-      - [ ] Spell correction (query-log-mined) — not started; trigram
-            fallback (Phase 0, done) covers the simplest typo cases
-            but isn't real spell correction.
-      - [ ] Seed synonym dictionary — not started.
+      - [x] Normalization, incl. diacritic folding (2026-08-17) —
+            `unaccent` Postgres extension + an `immutable_unaccent()`
+            wrapper (generated columns require IMMUTABLE — `unaccent`
+            itself is STABLE) folds accents into both the indexed
+            `searchVector` (migration `20260817120000_search_phase1_
+            query_understanding`, full-table rewrite, 1,749 rows) and
+            the query side (`unaccent()` wrapped around every
+            `plainto_tsquery`/`to_tsquery` call) — "café" and "cafe"
+            now match each other. Dry-run tested in a rolled-back
+            transaction against prod before merge per house rule.
+      - [x] Language detection (2026-08-17) — **deliberate
+            substitution**: real word-level language ID (e.g. `franc`)
+            is unreliable on the 1-3 word queries search actually
+            sees, and Phase 0's `'simple'` tsvector config doesn't
+            switch per-language analyzers regardless (see Phase-0
+            note above) — so we log coarse Unicode-**script**
+            classification instead (`modules/search/script-detect.ts`
+            → `SearchQueryLog.script`: latin/arabic/ethiopic/cyrillic/
+            cjk/mixed/unknown), which we can actually classify
+            accurately and could plausibly act on. True per-language
+            analyzers are still a real Phase 2+ decision if semantic
+            retrieval needs them.
+      - [x] Spell correction, query-log-mined (2026-08-17) —
+            `repository.ts:suggestCorrection` mines `SearchQueryLog`
+            for a trigram-similar past query that (a) has actually
+            returned results historically and (b) isn't a one-off
+            (frequency ≥ 2), then `service.ts` only surfaces it as
+            `didYouMean` when its LIVE result count beats the current
+            query's — never a stale suggestion. Only attempted when
+            the current query's results are thin (< 3). Wired into web
+            (`/search` banner) and mobile (`SearchScreen`, tap row
+            re-runs the search).
+      - [x] Seed synonym dictionary (2026-08-17) — new `SearchSynonym`
+            table (canonical + terms[], GIN index), 20 hand-picked
+            starter groups (British/American spelling pairs — cookie/
+            biscuit, diaper/nappy, sneakers/trainers — plus local/
+            alternate names common on an African grocery marketplace —
+            garri/gari, okra/okro, plantain/dodo). Query-time
+            expansion (`repository.ts:buildSynonymExpansion`) only
+            switches from `plainto_tsquery` to an explicit
+            `to_tsquery` OR-expression when a query word actually hits
+            the dictionary — zero behavioural change for every other
+            search. Growing this from real reformulation patterns
+            (query-log-mined, not hand-picked) is Phase 2+ work once
+            there's volume to mine.
       - [x] Zero-result recovery — trigram similarity fallback
             (`trigramFallbackSearch`) when the lexical query returns
             nothing on page 1.
@@ -460,11 +522,15 @@ revenue.
       - [ ] Online A/B testing & interleaving for ranker changes — not
             started (ties to "A/B testing & experimentation engine"
             in Platform Intelligence below).
-- [~] **Autocomplete / query suggestion** (TBD) — predictive search
+- [x] **Autocomplete / query suggestion** (TBD) — predictive search
       suggestions as the customer types. Built together with Search
       ranking & relevance above (same spec, Section 12) — see that
       entry's sub-checklist for status. Backend shipped
-      (`GET /api/search/autocomplete`); frontend dropdown not built.
+      (`GET /api/search/autocomplete`); frontend header `SearchBar`
+      dropdown shipped in the same PR (this note was stale — the
+      Phase 0 frontend bullet above already covered it). Still only
+      functionally verified, not interactively click-tested in a real
+      browser session.
       Design doc: `Afrizonemart_Search_Discovery_Design_Spec.docx` ·
       PR(s): same as Search ranking & relevance · Notes: see above.
 - [x] **Frequently bought together & bundling** (P1, shipped) —
@@ -647,6 +713,47 @@ time.
 _(Newest first. One entry per system when its spec lands or it ships —
 mirrors the `ARCHITECTURE_TRACKER.md` close-out convention: plain-English
 summary of what we built, when, and where the code lives.)_
+
+- **2026-08-17** — Search & Discovery: closed out the rest of **Phase 0**
+  and all of **Phase 1** (query understanding). `afrizonemart-api`
+  (migration `20260817120000_search_phase1_query_understanding`, dry-run
+  tested in a rolled-back transaction against prod before merge):
+  diacritic folding via `unaccent` + an `immutable_unaccent()` wrapper
+  (generated columns need IMMUTABLE, `unaccent` itself is STABLE) on
+  both the indexed `searchVector` and the query side; coarse Unicode-
+  script logging (`SearchQueryLog.script`) as a disclosed substitution
+  for real language ID, which is unreliable on 1-3 word queries; query-
+  log-mined "did you mean" (`suggestCorrection` + a live-result-count
+  check so a stale suggestion never gets surfaced); a 20-group seed
+  `SearchSynonym` dictionary (British/American pairs + local grocery
+  terms — garri/gari, okra/okro) with query-time `to_tsquery`
+  expansion that only kicks in when a word actually hits the
+  dictionary; Phase 0 facet counts (`GET /api/search`'s new `facets`
+  field — origin/rating/inStock/onSale, each excluding its own
+  filter); `SearchQueryLog.durationMs`/`usedFallback`/`didYouMeanShown`
+  columns feeding a new `GET /api/admin/search/stats` (p50/p95/p99 via
+  `percentile_cont`, zero-result rate, top zero-result queries) behind
+  `analytics.read` — the "p95 < 200ms" / "zero-result rate < 5%"
+  checklist items now have the instrumentation to actually check them;
+  still nothing to report until real traffic exists. `afrizonemart-v2`:
+  `FiltersSidebar` renders the new facet counts (origin/rating/
+  inStock/onSale — category facet skipped, `/search` doesn't render a
+  category group at all); new `SearchResultCard` wires the
+  click-tracking call (`trackSearchClick`) that had existed
+  server-side since Phase 0 but was never actually fired from a click;
+  a "did you mean" banner links to the reformulated query.
+  **`afrizonemart-mobile`**: found and fixed a real Phase-0 gap, not
+  just missing polish — `SearchScreen` had been calling the old naive
+  `/api/products?q=` ILIKE listing the entire time Phase 0 was "live"
+  on web, never wired to the actual search API. New `fetchSearch`/
+  `trackSearchClick`, `useSearch` hook, `searchItemToCard` adapter —
+  mobile now gets real ranking, typo tolerance, click tracking, and
+  the did-you-mean row (tap-to-apply). `tsc --noEmit` clean across all
+  three repos. Deliberately out of scope this round (confirmed with
+  Magnus): Phase 2 semantic/hybrid retrieval (blocked on the same
+  embedding-infra decision as Recommendations Phase 3), Phase 3
+  learned ranking (no feature store, no volume to train on yet), Phase
+  4 personalization (ties to Recommendations' paused bandit work).
 
 - **2026-08-15** — Recommendations & Personalization **Phase 2**
   (mobile frontend) shipped and deployed live. `afrizonemart-mobile`

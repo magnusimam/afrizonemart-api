@@ -2,17 +2,29 @@ import { prisma } from '@/infra/prisma';
 import { logger } from '@/infra/logger';
 import { categorySlugWithDescendants } from '@/modules/products/repository';
 import type { AutocompleteQuery, SearchQuery } from './schema';
+import { detectScript } from './script-detect';
 import {
+  buildSynonymExpansion,
+  fetchSynonymGroups,
   insertSearchQueryLog,
+  lexicalFacets,
   lexicalSearch,
   lexicalSearchCount,
   recordSearchClick,
+  suggestCorrection,
   suggestProducts,
   suggestQueries,
+  trigramFacets,
   trigramFallbackCount,
   trigramFallbackSearch,
+  type SearchFacets,
   type SearchRow,
 } from './repository';
+
+/// "Did you mean" is only worth the extra queries when the primary
+/// result set is thin — a healthy result count means the searcher
+/// found what they typed, reformulation risk outweighs the benefit.
+const DID_YOU_MEAN_RESULT_THRESHOLD = 3;
 
 /**
  * Business logic for Search & Discovery Phase 0 (see
@@ -68,6 +80,13 @@ async function resolveCategoryIds(slug: string | undefined): Promise<string[] | 
   return rows.map((r) => r.id);
 }
 
+/// The tsvector-word tokenizer used for synonym lookups needs to agree
+/// with `to_tsquery`'s own lexeme rules (letters/digits/apostrophes) —
+/// see `repository.ts:tokenizeForTsQuery`. Duplicated narrowly here so
+/// the service layer doesn't need a DB round-trip just to know which
+/// words to look up.
+const WORD_RE = /[\p{L}\p{N}']+/gu;
+
 export interface SearchResult {
   items: ReturnType<typeof serializeRow>[];
   pagination: { page: number; limit: number; total: number; pages: number };
@@ -79,12 +98,22 @@ export interface SearchResult {
   /// passes it back on `POST /api/search/click` to attribute a click
   /// to the query that produced it.
   queryLogId: string | null;
+  /// Phase 0 facet counts (origin/rating/inStock/onSale) — see
+  /// `repository.ts:computeFacets`. Null when the query was empty
+  /// (nothing to facet) or the facet queries themselves failed —
+  /// facets are supplementary, never worth breaking search over.
+  facets: SearchFacets | null;
+  /// Phase 1 "did you mean" reformulation suggestion — only populated
+  /// when this query's own results are thin AND a query-log-mined
+  /// candidate exists that would return strictly more.
+  didYouMean: string | null;
 }
 
 export async function search(
   query: SearchQuery,
   ctx: { userId?: string },
 ): Promise<SearchResult> {
+  const start = Date.now();
   const normalizedQuery = normalizeQuery(query.q);
   if (!normalizedQuery) {
     return {
@@ -92,14 +121,29 @@ export async function search(
       pagination: { page: query.page, limit: query.limit, total: 0, pages: 1 },
       usedFallback: false,
       queryLogId: null,
+      facets: null,
+      didYouMean: null,
     };
   }
 
   const categoryIds = await resolveCategoryIds(query.category);
   const offset = (query.page - 1) * query.limit;
+  const script = detectScript(normalizedQuery);
 
-  let rows = await lexicalSearch(query, normalizedQuery, categoryIds, query.limit, offset);
-  let total = await lexicalSearchCount(query, normalizedQuery, categoryIds);
+  // Phase 1 synonym expansion — only touches the query shape when a
+  // word actually hits the seed dictionary (see
+  // `buildSynonymExpansion`'s doc comment).
+  const tokens = normalizedQuery.match(WORD_RE) ?? [];
+  let tsQueryExpr: string | null = null;
+  try {
+    const synonymsByToken = await fetchSynonymGroups(tokens);
+    tsQueryExpr = buildSynonymExpansion(normalizedQuery, synonymsByToken);
+  } catch (error) {
+    logger.error('search.synonym_lookup_failed', { error });
+  }
+
+  let rows = await lexicalSearch(query, normalizedQuery, categoryIds, query.limit, offset, tsQueryExpr);
+  let total = await lexicalSearchCount(query, normalizedQuery, categoryIds, tsQueryExpr);
   let usedFallback = false;
 
   // Zero-result recovery (spec Section 3.1/6.1) — only worth trying on
@@ -110,6 +154,35 @@ export async function search(
     total = await trigramFallbackCount(query, query.q, categoryIds);
     usedFallback = rows.length > 0;
   }
+
+  // Facets (Phase 0) — best-effort, never let a facet-query failure
+  // take down the actual result response.
+  let facets: SearchFacets | null = null;
+  try {
+    facets = usedFallback
+      ? await trigramFacets(query, query.q, categoryIds)
+      : await lexicalFacets(query, normalizedQuery, categoryIds, tsQueryExpr);
+  } catch (error) {
+    logger.error('search.facets_failed', { error });
+  }
+
+  // Did-you-mean (Phase 1) — only attempted on page 1 with thin
+  // results; only surfaced when the candidate's LIVE result count
+  // (not its stale logged count) actually beats what the searcher got.
+  let didYouMean: string | null = null;
+  if (query.page === 1 && total < DID_YOU_MEAN_RESULT_THRESHOLD) {
+    try {
+      const candidate = await suggestCorrection(normalizedQuery);
+      if (candidate) {
+        const candidateTotal = await lexicalSearchCount(query, candidate.normalizedQuery, categoryIds);
+        if (candidateTotal > total) didYouMean = candidate.normalizedQuery;
+      }
+    } catch (error) {
+      logger.error('search.did_you_mean_failed', { error });
+    }
+  }
+
+  const durationMs = Date.now() - start;
 
   // Query-log loop (spec Section 16.3) — never let logging failure
   // break a search response.
@@ -122,6 +195,10 @@ export async function search(
       userId: ctx.userId,
       sessionId: query.sessionId,
       country: query.country,
+      durationMs,
+      script,
+      usedFallback,
+      didYouMeanShown: didYouMean !== null,
     });
   } catch (error) {
     logger.error('search.query_log_failed', { error });
@@ -137,6 +214,8 @@ export async function search(
     },
     usedFallback,
     queryLogId,
+    facets,
+    didYouMean,
   };
 }
 
