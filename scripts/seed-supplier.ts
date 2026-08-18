@@ -9,6 +9,7 @@
  */
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { refuseOnProduction } from './lib/refuse-on-production';
 
 const prisma = new PrismaClient();
 
@@ -16,15 +17,10 @@ const EMAIL = 'adia@adiafoods.ng';
 const PASSWORD = process.env.SEED_SUPPLIER_PASSWORD ?? 'Supplier123!';
 
 async function main() {
-  // This creates an account with a password that is published in this file.
-  // Harmless on a dev box, a live vulnerability anywhere else.
-  if (process.env.NODE_ENV === 'production') {
-    console.error(
-      'Refusing to run: this seed creates a demo account with a known password.\n' +
-        'It is for local development only — see PRODUCTION_CUTOVER.md §8.',
-    );
-    process.exit(1);
-  }
+  // Creates an account with a password published in this file: harmless on a
+  // dev box, a live vulnerability anywhere else. Guards on the DATABASE_URL
+  // host, not just NODE_ENV — see lib/refuse-on-production.ts.
+  refuseOnProduction('seed-supplier');
 
   const passwordHash = await bcrypt.hash(PASSWORD, 12);
 

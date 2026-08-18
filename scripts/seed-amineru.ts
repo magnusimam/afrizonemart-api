@@ -1,14 +1,12 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { refuseOnProduction } from './lib/refuse-on-production';
 
 const prisma = new PrismaClient();
 
 async function main() {
   // Creates an account with a password published in this file — dev only.
-  if (process.env.NODE_ENV === 'production') {
-    console.error('Refusing to run: dev-only seed with a known password.');
-    process.exit(1);
-  }
+  refuseOnProduction('seed-amineru');
 
   const hash = await bcrypt.hash(process.env.SEED_SUPPLIER_PASSWORD ?? 'Supplier123!', 12);
 
