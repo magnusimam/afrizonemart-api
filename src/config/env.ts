@@ -99,6 +99,71 @@ const envSchema = z.object({
   EMAIL_FROM: z.string().default('Afrizonemart <no-reply@afrizonemart.com>'),
   EMAIL_REPLY_TO: z.string().optional(),
 
+  /**
+   * Outside production, only these addresses actually receive mail.
+   *
+   * The dev database holds 83 real supplier email addresses, and the provider
+   * factory picks Resend the moment RESEND_API_KEY is set — regardless of
+   * NODE_ENV. Without this guard, approving a PIQ locally emails a real
+   * business. Comma-separated; `*@example.com` style wildcards allowed.
+   *
+   * Ignored entirely when NODE_ENV=production, where every recipient is real
+   * by definition. Empty in a non-production env means nothing is delivered —
+   * deliberately fail-closed: a silent no-send is recoverable, an accidental
+   * send to a supplier is not.
+   */
+  EMAIL_DEV_ALLOWLIST: z.string().default(''),
+
+  /**
+   * Base URL for links inside emails.
+   *
+   * Deliberately separate from WEB_URL. WEB_URL is whatever the local dev
+   * server happens to be (http://localhost:8085), and an email is the one
+   * artefact that outlives the machine that produced it — a "localhost" link
+   * in a supplier's inbox is dead on arrival. Defaulting to the public site
+   * means a stray send from a laptop still carries usable links.
+   *
+   * Override locally only when you specifically want to click through to your
+   * own dev server.
+   */
+  EMAIL_LINK_BASE: z.string().url().default('https://afrizonemart.com'),
+
+  /**
+   * Supplier lifecycle cron — the time-based reminders (PO unacknowledged,
+   * delivery due soon).
+   *
+   * Defaults to DRY RUN, deliberately. SUPPLIER_EMAIL_SEQUENCE.md §5 phase 4:
+   * with 83 real businesses in the table, one bad sweep is a reputational
+   * event rather than a bug. Run it in dry-run for a few days, read the
+   * "would send" logs, and only then set SUPPLIER_LIFECYCLE_SEND=1.
+   */
+  SUPPLIER_LIFECYCLE_SEND: z
+    .enum(['0', '1'])
+    .default('0')
+    .transform((v) => v === '1'),
+
+  /**
+   * Claude API key, for drafting the authored passages of a diagnostic report
+   * (executive summary, headline findings, decision paragraph).
+   *
+   * Optional, and the gate for the whole feature: without it the report's
+   * authored slots stay empty and the auditor writes them by hand, exactly as
+   * today. Drafts are never released unreviewed — a lead auditor must read and
+   * approve each passage before the report can be authorised.
+   */
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ASSESSMENT_NARRATIVE_MODEL: z.string().default('claude-opus-5'),
+
+  /**
+   * Who receives the QA copy of a released diagnostic report, comma-separated.
+   *
+   * The report goes to the supplier and to Afrizonemart. Defaults to
+   * EMAIL_REPLY_TO so the supplier-desk inbox always holds a copy without
+   * extra configuration — a released assessment with no internal record is
+   * how a verdict gets disputed with nothing to point at.
+   */
+  ASSESSMENT_REPORT_ADMIN_RECIPIENTS: z.string().optional(),
+
   /// WhatsApp Cloud API — admin order-alert pipeline. When all four
   /// are set the MetaCloudWhatsAppProvider is selected; otherwise
   /// the ConsoleWhatsAppProvider logs the rendered message to stdout
