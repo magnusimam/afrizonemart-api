@@ -2518,6 +2518,18 @@ model SupplierAudit {
   summary         String?
   recommendations String?
 
+  /// The report document as issued, when one exists as a file.
+  ///
+  /// The first cohort of diagnostic reports was written in Word before the
+  /// portal could generate them, and the supplier must be able to read exactly
+  /// the document that was signed - not a re-render that might differ from it.
+  /// The key is a random path rather than the company name: these carry a
+  /// "Confidential - Restricted Distribution" classification, so the URL must
+  /// not be guessable from the supplier's name.
+  reportFileUrl  String?
+  reportFileName String?
+  reportFileType String?
+
   auditorName String?
   conductedAt DateTime?
 

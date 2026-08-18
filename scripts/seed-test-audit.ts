@@ -27,7 +27,14 @@ import { scoreAssessment, type AssessmentResponse } from '../src/modules/supplie
 
 const prisma = new PrismaClient();
 
-const SUPPLIER_EMAIL = 'adia@adiafoods.ng';
+/** Target supplier. --email= lets the same fixture run against the demo
+ *  account, so a report can be reviewed before any real supplier sees one. */
+const emailArg = process.argv.find((a) => a.startsWith('--email='));
+const SUPPLIER_EMAIL = (
+  emailArg ? emailArg.slice('--email='.length) : 'adia@adiafoods.ng'
+)
+  .trim()
+  .toLowerCase();
 const PROTOCOL_CODE = 'AFZ-QA-FPS-001';
 const MARKER = '[TEST DATA]';
 
@@ -190,7 +197,7 @@ async function main() {
   }
 
   const excluded = checklist.excluded.length;
-  console.log(`✓ Seeded test audit for Adia Foods (${supplierId})`);
+  console.log(`✓ Seeded test audit for ${user.supplierProfile.companyName} (${supplierId})`);
   console.log(`  protocol      ${protocol.code} v${protocol.version}`);
   console.log(`  checklist     ${checklist.items.length} applicable, ${excluded} excluded by profile`);
   console.log(`  findings      ${counts.critical}C ${counts.major}M ${counts.minor}Mi ${counts.observation}O ${counts.compliant}Cpt`);
