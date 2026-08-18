@@ -3,7 +3,7 @@ import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
 import { logger } from '@/infra/logger';
 import { register, type PublicUser } from '@/modules/auth/service';
-import { notifyPIQSubmitted } from './notify';
+import { notifyApplicationReceived, notifyEOIReceived, notifyPIQSubmitted } from './notify';
 import { getAuditTemplate } from './audit-templates';
 import type {
   ApplyBody,
@@ -132,6 +132,22 @@ export async function applyAsSupplier(
 
   logger.info('supplier.applied', { userId, supplierId: profile.id });
 
+  // Confirm the application landed. Both branches above converge here — whether
+  // they registered just now or applied from an existing account — so the email
+  // is read back off the user record rather than the optional `auth` result.
+  const applicant = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true, name: true },
+  });
+  if (applicant) {
+    await notifyApplicationReceived({
+      to: applicant.email,
+      userId,
+      recipientName: applicant.name ?? profile.contactName,
+      companyName: profile.companyName,
+    });
+  }
+
   return { supplier: toPublicSupplier(profile), auth };
 }
 
@@ -223,6 +239,47 @@ export async function getVisit(userId: string): Promise<PublicVisit | null> {
   };
 }
 
+/**
+ * Stage 8 — the Take50 production booking, as the supplier sees it.
+ *
+ * Read-only on this side: the crew book, reschedule and complete the shoot from
+ * the admin surface, so there is no supplier-facing write. It exists because
+ * the booking email was previously the ONLY place the date and location lived —
+ * a supplier who lost that mail had no way to look up when the crew were
+ * coming.
+ */
+export interface PublicProductionBooking {
+  status: string;
+  scheduledAt: string;
+  location: string | null;
+  contactName: string | null;
+  contactPhone: string | null;
+  productList: string | null;
+  notes: string | null;
+  completedAt: string | null;
+}
+
+/** GET /me/production — the supplier's shoot, or null if none is booked. */
+export async function getProductionBooking(
+  userId: string,
+): Promise<PublicProductionBooking | null> {
+  const profile = await profileOrThrow(userId);
+  const b = await prisma.productionBooking.findUnique({
+    where: { supplierId: profile.id },
+  });
+  if (!b) return null;
+  return {
+    status: b.status,
+    scheduledAt: b.scheduledAt.toISOString(),
+    location: b.location ?? null,
+    contactName: b.contactName ?? null,
+    contactPhone: b.contactPhone ?? null,
+    productList: b.productList ?? null,
+    notes: b.notes ?? null,
+    completedAt: b.completedAt ? b.completedAt.toISOString() : null,
+  };
+}
+
 /** POST /me/visit/request — propose a visit date (idempotent upsert). */
 export async function requestVisit(
   userId: string,
@@ -254,6 +311,9 @@ export interface PublicSupplierAudit {
   summary: string | null;
   recommendations: string | null;
   conductedAt: string | null;
+  /** Lead auditor's typed signature and when they released the report. */
+  signedBy: string | null;
+  approvedAt: string;
   responses: Record<string, { rating?: string; findings?: string }>;
   capa: unknown[];
   /// The category template (sections + checkpoints) so the supplier can see
@@ -263,12 +323,19 @@ export interface PublicSupplierAudit {
 
 /**
  * GET /me/audit — the supplier's product-commodity audit REPORT. Returns null
- * until the Quality & Compliance team has completed it (drafts stay private).
+ * until the Quality & Compliance team has completed it (drafts stay private)
+ * AND a lead auditor has authorised its release.
+ *
+ * Both conditions matter. Completion only means every checkpoint is rated;
+ * without the `approvedAt` check a supplier could read an unsigned verdict by
+ * visiting /supplier/audit-report directly, which is exactly what the sign-off
+ * gate exists to prevent — the email would be held back while the page leaked
+ * the same result.
  */
 export async function getAudit(userId: string): Promise<PublicSupplierAudit | null> {
   const profile = await profileOrThrow(userId);
   const a = await prisma.supplierAudit.findUnique({ where: { supplierId: profile.id } });
-  if (!a || a.status !== 'COMPLETED') return null;
+  if (!a || a.status !== 'COMPLETED' || !a.approvedAt) return null;
   const template = a.category ? getAuditTemplate(a.category) : null;
   return {
     status: a.status,
@@ -280,6 +347,8 @@ export async function getAudit(userId: string): Promise<PublicSupplierAudit | nu
     summary: a.summary ?? null,
     recommendations: a.recommendations ?? null,
     conductedAt: a.conductedAt ? a.conductedAt.toISOString() : null,
+    signedBy: a.signedBy ?? null,
+    approvedAt: a.approvedAt.toISOString(),
     responses: (a.responses as Record<string, { rating?: string; findings?: string }>) ?? {},
     capa: (a.capa as unknown[]) ?? [],
     template,
@@ -422,6 +491,27 @@ export async function completeStage(
       currentStage: nextStage,
     },
   });
+
+  // Stage 2 (Expression of Interest) is the handoff into the PIQ, and the email
+  // is the only thing that tells them that's the next step. Fetched lazily and
+  // only for stage 2 so the common path doesn't pay for a join.
+  //
+  // `notifyEOIReceived` is once-ever guarded: re-completing the EoI (which this
+  // endpoint deliberately permits) must not re-send it.
+  if (stage === 2) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, name: true },
+    });
+    if (user) {
+      await notifyEOIReceived({
+        to: user.email,
+        userId,
+        recipientName: user.name ?? updated.contactName,
+      });
+    }
+  }
+
   return toPublicSupplier(updated);
 }
 
