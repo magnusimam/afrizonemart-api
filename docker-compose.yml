@@ -1,0 +1,68 @@
+# Local development database.
+#
+# WHY THIS EXISTS: the dev Postgres was previously started with a bare
+# `docker run` (container name `azm-pg`). Nothing in the repo described it, so
+# when the container stopped there was no way to recreate it without knowing
+# the original flags from memory. This file is that description.
+#
+#   docker compose up -d      # start
+#   docker compose logs -f db # watch
+#   docker compose down       # stop (KEEPS data — the volume is named)
+#
+# `docker compose down -v` DELETES the volume and every supplier record in it.
+# There is no undo. Take a dump first (see MIGRATING below).
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# MIGRATING FROM THE EXISTING `azm-pg` CONTAINER
+#
+# This compose service uses its own named volume, so the first `up` starts an
+# EMPTY database — it does not adopt `azm-pg`'s data. Move the data across
+# before switching, with both stopped except the source:
+#
+#   docker start azm-pg
+#   docker exec azm-pg pg_dump -U azm -d afrizonemart -Fc > azm-backup.dump
+#   docker stop azm-pg
+#   docker compose up -d
+#   docker compose exec -T db pg_restore -U azm -d afrizonemart --clean --if-exists < azm-backup.dump
+#
+# Check the source version first — a volume written by a newer Postgres will
+# not start under an older one:
+#
+#   docker exec azm-pg postgres --version
+#
+# and set `image:` below to match. It is pinned to 16 because that is what
+# production (Railway) runs; matching prod locally is worth more than matching
+# whatever the old container happened to be.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: azm-pg-compose
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: azm
+      # Read from the shell/.env so the password is never committed. Export it
+      # first, or put POSTGRES_PASSWORD in a local .env beside this file:
+      #   POSTGRES_PASSWORD=<same value as the password in DATABASE_URL>
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (match the one in DATABASE_URL)}
+      POSTGRES_DB: afrizonemart
+    ports:
+      # Host 5433 to match DATABASE_URL and leave the native Windows
+      # postgresql-x64-17 service on 5432 undisturbed.
+      - '5433:5432'
+    volumes:
+      - azm_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Without this the API can start against a Postgres that is listening but
+      # not yet accepting queries — which surfaces as a confusing P1001 rather
+      # than "still booting".
+      test: ['CMD-SHELL', 'pg_isready -U azm -d afrizonemart']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  azm_pgdata:
+    name: azm_pgdata

@@ -25,6 +25,20 @@ The database runs in Docker. If the connection is refused, it isn't running:
 docker start azm-pg
 ```
 
+> **If `docker` itself hangs or says the pipe doesn't exist**, the container is
+> not the problem — the `com.docker.service` Windows service is stopped. It
+> needs admin rights: quit Docker Desktop and reopen it with **Run as
+> administrator**, or `Start-Service com.docker.service` from an elevated
+> PowerShell. A misleading detail: port 5433 can still *accept* TCP connections
+> while this is broken, because Docker's proxy keeps listening after the
+> container dies. `psql` then hangs and Prisma reports `P1001`. Test with a real
+> query, not a port check.
+
+There is now a `docker-compose.yml` describing this database, so it can be
+recreated from the repo rather than from memory (`docker compose up -d`). It
+starts an empty volume — read the MIGRATING notes at the top of that file
+before switching away from the `azm-pg` container.
+
 ### Two accounts, on purpose
 
 - **`azm_readonly`** — `SELECT` only. It physically cannot change or delete a

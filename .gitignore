@@ -19,3 +19,9 @@ prisma/migrations/dev.db*
 
 # Internal AZM audit source docs (PII / confidential) + regen scripts
 /supplier-docx/
+
+# Local email render output (npm run preview-emails)
+tmp/
+
+# Local database dumps (contain supplier PII)
+/.backups/
