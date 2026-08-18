@@ -406,7 +406,7 @@ export async function authoriseAudit(
   // what the supplier receives: a regenerated PDF would be a different
   // artefact making the same claims, and for a verdict that decides whether a
   // business can list, "equivalent" is not the same as "the one you signed".
-  let attachment: { filename: string; content: Buffer } | null = null;
+  let attachment: { filename: string; content: Buffer; contentType?: string } | null = null;
   let report: ReturnType<typeof buildReportFor> = null;
 
   if (updated.reportFileUrl) {
@@ -415,6 +415,10 @@ export async function authoriseAudit(
       updated.reportFileName ?? 'Afrizonemart-Diagnostic-Report',
       supplierId,
     );
+    // The stored MIME type, so a .docx is not announced as a PDF.
+    if (attachment && updated.reportFileType) {
+      attachment.contentType = updated.reportFileType;
+    }
   } else {
     report = buildReportFor(supplier, updated, signedBy);
     const pdf = report ? await renderReportPdf(report) : null;

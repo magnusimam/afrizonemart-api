@@ -170,8 +170,9 @@ export function AuditCompleteEmail(p: {
 
       <Paragraph>
         The full diagnostic report is in your portal — every checkpoint rating,
-        the team’s findings, and any corrective actions, all downloadable as a
-        PDF for your own records.
+        the team’s findings, and any corrective actions. The signed report is
+        attached to this email, and you can download it from your dashboard at
+        any time.
       </Paragraph>
       <Button href={p.dashboardUrl}>View your audit report</Button>
       <ButtonFallback href={p.dashboardUrl} />

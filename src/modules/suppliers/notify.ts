@@ -146,7 +146,7 @@ export async function notifyAuditComplete(p: {
    *  unavailable the email still goes out, and the supplier reads the report
    *  in the portal instead. A missing attachment must never withhold a
    *  verdict the supplier is entitled to. */
-  reportPdf?: { filename: string; content: Buffer };
+  reportPdf?: { filename: string; content: Buffer; contentType?: string };
 }): Promise<void> {
   await sendEmail({
     type: 'supplier.audit.complete',
@@ -160,7 +160,17 @@ export async function notifyAuditComplete(p: {
       dashboardUrl: dashboardUrl(),
     }),
     attachments: p.reportPdf
-      ? [{ filename: p.reportPdf.filename, content: p.reportPdf.content, contentType: 'application/pdf' }]
+      ? [
+          {
+            filename: p.reportPdf.filename,
+            content: p.reportPdf.content,
+            // Was hardcoded to application/pdf. The first cohort of reports
+            // are .docx files, so that mislabelled every one of them: some
+            // clients refuse to open an attachment whose type contradicts
+            // its extension. Falls back to PDF for engine-rendered reports.
+            contentType: p.reportPdf.contentType ?? 'application/pdf',
+          },
+        ]
       : undefined,
   });
   logger.info('supplier.email.audit_complete', { to: p.to, attached: Boolean(p.reportPdf) });
@@ -181,7 +191,7 @@ export async function notifyAuditReportFiled(p: {
   indicativeScore: number;
   signedBy: string;
   documentCode: string;
-  reportPdf?: { filename: string; content: Buffer };
+  reportPdf?: { filename: string; content: Buffer; contentType?: string };
 }): Promise<void> {
   if (p.recipients.length === 0) return;
 
@@ -195,7 +205,13 @@ export async function notifyAuditReportFiled(p: {
   });
 
   const attachments = p.reportPdf
-    ? [{ filename: p.reportPdf.filename, content: p.reportPdf.content, contentType: 'application/pdf' }]
+    ? [
+        {
+          filename: p.reportPdf.filename,
+          content: p.reportPdf.content,
+          contentType: p.reportPdf.contentType ?? 'application/pdf',
+        },
+      ]
     : undefined;
 
   for (const to of p.recipients) {
