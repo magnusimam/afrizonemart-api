@@ -6,6 +6,7 @@
  *   suppliers.visits  — Facility Visit team: schedule/confirm site visits
  *   suppliers.audit   — Quality & Compliance: conduct product-commodity audits
  *   suppliers.trade   — Activation & Procurement: publish listings + issue purchase orders
+ *   suppliers.production — Take50: book & run supplier content shoots
  *
  * The user is set to role STAFF (if not already ADMIN) and the caps are merged
  * into User.permissions[]. ADMIN users already have every capability — for them
@@ -20,7 +21,13 @@
  */
 import { PrismaClient } from '@prisma/client';
 
-const SUPPLIER_CAPS = ['suppliers.review', 'suppliers.visits', 'suppliers.audit', 'suppliers.trade'] as const;
+const SUPPLIER_CAPS = [
+  'suppliers.review',
+  'suppliers.visits',
+  'suppliers.audit',
+  'suppliers.trade',
+  'suppliers.production',
+] as const;
 
 async function main() {
   const [emailArg, ...capArgs] = process.argv.slice(2);

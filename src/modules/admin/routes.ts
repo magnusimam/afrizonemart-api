@@ -35,6 +35,7 @@ import { adminProductSubmissionRoutes } from '@/modules/product-submissions/admi
 import { adminSupplierRoutes } from '@/modules/suppliers/admin.routes';
 import { adminFacilityVisitRoutes } from '@/modules/suppliers/admin.visit.routes';
 import { adminSupplierAuditRoutes } from '@/modules/suppliers/admin.audit.routes';
+import { adminSupplierProductionRoutes } from '@/modules/suppliers/admin.production.routes';
 import { adminOrientationRoutes } from '@/modules/suppliers/admin.orientation.routes';
 import { adminTradeRoutes } from '@/modules/suppliers/admin.trade.routes';
 import { adminDocumentSubmissionRoutes } from '@/modules/document-submissions/admin.routes';
@@ -119,6 +120,7 @@ adminRouter.use('/feature-flags', requireCapability('feature-flags.write'), admi
 adminRouter.use('/suppliers', requireCapability('suppliers.review'), adminSupplierRoutes);
 adminRouter.use('/facility-visits', requireCapability('suppliers.visits'), adminFacilityVisitRoutes);
 adminRouter.use('/supplier-audits', requireCapability('suppliers.audit'), adminSupplierAuditRoutes);
+adminRouter.use('/supplier-production', requireCapability('suppliers.production'), adminSupplierProductionRoutes);
 adminRouter.use('/orientation', requireCapability('suppliers.review'), adminOrientationRoutes);
 adminRouter.use('/trade', requireCapability('suppliers.trade'), adminTradeRoutes);
 adminRouter.use('/loyalty', requireCapability('loyalty.read'), adminLoyaltyRoutes);

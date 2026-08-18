@@ -1,6 +1,7 @@
 import { type PurchaseOrder } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
+import { notifyPOAcknowledged } from './notify';
 
 /**
  * Stage 9 (Procurement & Trade) + Stage 10 (Continuous Engagement), supplier
@@ -66,6 +67,24 @@ export async function acknowledgePO(userId: string, id: string): Promise<PublicP
     where: { id },
     data: { status: 'ACKNOWLEDGED', acknowledgedAt: new Date() },
   });
+
+  // Confirmation back to the supplier — their own record that they committed,
+  // and to what date. The status guard above means this can only fire once per
+  // order (ISSUED → ACKNOWLEDGED is one-way), so no idempotency marker needed.
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true, name: true, supplierProfile: { select: { contactName: true } } },
+  });
+  if (user && updated.dueDate) {
+    await notifyPOAcknowledged({
+      to: user.email,
+      userId,
+      recipientName: user.name ?? user.supplierProfile?.contactName ?? 'there',
+      poNumber: updated.poNumber,
+      deliveryDue: updated.dueDate,
+    });
+  }
+
   return toPublicPO(updated);
 }
 
