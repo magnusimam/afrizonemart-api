@@ -122,8 +122,17 @@ async function main() {
     // Mirrors `authoriseAudit`, which already does max(currentStage, 7).
     if (s.audit) {
       if (s.audit.status === 'COMPLETED') {
-        const outcome = s.audit.outcome ? ` ${s.audit.outcome}` : '';
-        signals.push({ floor: 7, why: `audit COMPLETED${outcome}` });
+        const outcome = s.audit.outcome ?? null;
+        // A completed audit is not automatically a passed one. Partnership
+        // (stage 7) is where a supplier signs the agreement, so moving a
+        // REJECTED supplier there tells them they passed something they
+        // failed. They belong at Product Audit (6): they reached it, the
+        // finding is theirs to remediate, and a re-assessment advances them.
+        if (outcome === 'REJECTED') {
+          signals.push({ floor: 6, why: 'audit COMPLETED REJECTED (stays at Product Audit)' });
+        } else {
+          signals.push({ floor: 7, why: `audit COMPLETED${outcome ? ` ${outcome}` : ''}` });
+        }
       } else {
         signals.push({ floor: 6, why: `audit ${s.audit.status}` });
       }
