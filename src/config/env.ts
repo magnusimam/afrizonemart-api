@@ -290,6 +290,40 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export const isProduction = env.NODE_ENV === 'production';
+
+/**
+ * In production, refuse to boot on a link base that points at a developer's
+ * machine.
+ *
+ * Zod validates that these are URLs; it cannot know that "localhost" is wrong.
+ * The failure they cause is silent and expensive: supplier invite tokens are
+ * single-use and are consumed whether or not the link resolved, so a localhost
+ * base does not produce a broken link you can resend — it burns the invite for
+ * every supplier it reached. Failing at startup is the cheap version of that
+ * mistake.
+ */
+if (isProduction) {
+  const LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?/i;
+  const offenders = (
+    [
+      ['WEB_URL', env.WEB_URL],
+      ['EMAIL_LINK_BASE', env.EMAIL_LINK_BASE],
+      ['API_PUBLIC_URL', env.API_PUBLIC_URL],
+    ] as const
+  ).filter(([, value]) => LOCAL.test(value));
+
+  if (offenders.length) {
+    console.error(
+      '❌ Refusing to start: NODE_ENV=production but these point at localhost:',
+    );
+    for (const [name, value] of offenders) console.error(`   ${name}=${value}`);
+    console.error(
+      'Emails built from these carry dead links. Supplier invite tokens are ' +
+        'single-use, so a bad base cannot be undone by resending.',
+    );
+    process.exit(1);
+  }
+}
 export const isDevelopment = env.NODE_ENV === 'development';
 
 export const corsOrigins = env.CORS_ORIGINS.split(',')
