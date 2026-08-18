@@ -68,8 +68,13 @@ const requested = new Set<string>([
 ]);
 
 async function main() {
+  // The default cohort is the bulk-imported suppliers. But naming an address
+  // explicitly is a different intent from "invite the cohort", so explicit
+  // targeting searches every supplier profile: without this, a smoke test
+  // against your own account matches nothing and reports a successful send of
+  // zero emails -- the one result that looks identical to it having worked.
   const suppliers = await prisma.supplierProfile.findMany({
-    where: { source: 'sheet-import' },
+    where: requested.size ? {} : { source: 'sheet-import' },
     include: { user: true },
     orderBy: { companyName: 'asc' },
   });
