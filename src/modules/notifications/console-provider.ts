@@ -14,10 +14,19 @@ export class ConsoleEmailProvider implements EmailProvider {
       to: message.to,
       subject: message.subject,
       tags: message.tags,
+      attachments: message.attachments?.map((a) => a.filename),
     });
+    // Attachments are printed in full: a calendar invite that fails to parse in
+    // a mail client is otherwise invisible until someone reports a missing
+    // meeting, and the .ics body is the only way to see why in dev.
+    const attached = message.attachments?.length
+      ? message.attachments
+          .map((a) => `\n─── ATTACHMENT: ${a.filename} (${a.contentType ?? 'unknown'}) ───\n${a.content.toString()}`)
+          .join('')
+      : '';
     // eslint-disable-next-line no-console
     console.log(
-      `\n────────── EMAIL (console) ──────────\nTo: ${message.to}\nSubject: ${message.subject}\n─── HTML ───\n${message.html}\n─────────────────────────────────────\n`,
+      `\n────────── EMAIL (console) ──────────\nTo: ${message.to}\nSubject: ${message.subject}\n─── HTML ───\n${message.html}${attached}\n─────────────────────────────────────\n`,
     );
     return { providerMessageId: `console_${Date.now()}` };
   }

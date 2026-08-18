@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Button, EmailLayout, Heading, Paragraph, SubHeading } from './_layout';
+import { Button, EmailLayout, Heading, Note, Paragraph, SubHeading } from './_layout';
 
 export interface SupplierInviteProps {
   recipientName: string;
@@ -32,10 +32,13 @@ export function SupplierInviteEmail(props: SupplierInviteProps) {
         link expires in 14 days — if it lapses, use “Forgot password” on the
         sign-in page to get a new one.
       </Paragraph>
-      <Paragraph>
+      {/* Fine print: reassurance for a cold invite (wrong address, forwarded
+          mail), so it belongs in the quiet register rather than competing
+          with the instruction above it. */}
+      <Note>
         Didn’t expect this? You can safely ignore this email — no changes are
         made until you set a password.
-      </Paragraph>
+      </Note>
     </EmailLayout>
   );
 }

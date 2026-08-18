@@ -3,6 +3,7 @@ import { NotificationStatus, type Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { logger } from '@/infra/logger';
 import { emailProvider } from './provider-factory';
+import type { EmailAttachment } from './email-provider';
 import { renderEmail } from './render';
 import { resolveDbTemplate } from './template-resolver';
 
@@ -28,10 +29,12 @@ export interface SendEmailInput {
    * hardcoded `template` React element.
    */
   variables?: Record<string, unknown>;
+  /** Files to attach — e.g. an .ics calendar invite for a scheduled meeting. */
+  attachments?: EmailAttachment[];
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<void> {
-  const { type, to, userId, context, replyTo, variables } = input;
+  const { type, to, userId, context, replyTo, variables, attachments } = input;
   let { subject, template } = input;
 
   // Try the admin-edited DB template first; fall back to the hardcoded
@@ -78,6 +81,7 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
       html,
       text,
       replyTo,
+      attachments,
       // Resend rejects anything outside [A-Za-z0-9_-]; our types use dots
       // (e.g. "user.welcome"), so swap them to underscores for the tag.
       tags: [{ name: 'type', value: type.replace(/[^A-Za-z0-9_-]/g, '_') }],
