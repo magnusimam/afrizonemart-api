@@ -100,6 +100,11 @@ function buildStructuredFilters(
       Prisma.sql`(cardinality(p."sellableCountries") = 0 OR ${c} = ANY(p."sellableCountries") OR p."origin" = ${c})`,
     );
   }
+  // Storefront visibility rule (2026-08-18) — same as the plain shop
+  // listing (`products/repository.ts`): a product with no real photo
+  // doesn't surface to customers, search included. Always on, never
+  // excludable (not a `FilterDimension` — there's no facet for it).
+  conditions.push(Prisma.sql`cardinality(p."images") > 0`);
 
   return conditions;
 }
@@ -415,6 +420,7 @@ export async function suggestProducts(prefix: string, limit: number): Promise<Pr
       CASE WHEN array_length(p.images, 1) IS NULL THEN NULL ELSE p.images[1] END AS image
     FROM "Product" p
     WHERE p."inStock" = true
+      AND cardinality(p."images") > 0
       AND (p.name ILIKE ${prefix + '%'} OR similarity(p.name, ${prefix}) > 0.3)
     ORDER BY (p.name ILIKE ${prefix + '%'}) DESC, similarity(p.name, ${prefix}) DESC, p.rating DESC
     LIMIT ${limit}

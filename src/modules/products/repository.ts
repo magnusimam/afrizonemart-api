@@ -80,6 +80,23 @@ export async function findProducts(query: ListProductsQuery) {
   if (query.placement) {
     Object.assign(where, placementFilter(query.placement, query.country?.toUpperCase()));
   }
+  // Storefront visibility rule (2026-08-18): a product with no real
+  // photo doesn't show to customers anywhere it's discovered by
+  // browsing — shop grids, category pages, search. This used to be a
+  // soft "sort images-first, pad with no-image after" (see git
+  // history) which still let no-image products reach the page, just
+  // later; a batch of 13 Rwanda products imported with a placeholder
+  // filename instead of a real URL in `images` (non-empty array, so
+  // the images-first sort treated them as "has a photo") slipped
+  // through that softness and rendered broken. Hard-excluding is also
+  // simpler: `Product.images` is now validated as real URLs on every
+  // write path (`admin.schema.ts`, `admin.bulk.ts`), so "empty" is an
+  // accurate signal again, and this is just `isEmpty` as a filter
+  // instead of a sort key. Deliberately does NOT apply to `query.ids`
+  // (explicit-id mode, above) — an admin manually curating a shelf
+  // has already decided membership; overriding that pick silently
+  // would be a different kind of surprise.
+  where.images = { isEmpty: false };
   // "Ships to my country" shop filter — independent of `inStock`. Only
   // takes effect when a `country` is known; otherwise there's nothing to
   // match against and the filter is a silent no-op rather than an error.
@@ -100,10 +117,9 @@ export async function findProducts(query: ListProductsQuery) {
     ];
   }
 
-  /// Trending sort short-circuits the image-priority dance below.
-  /// Trending products are by definition the ones customers are
-  /// already engaging with, so the "promote products with images"
-  /// safeguard isn't relevant here.
+  /// Trending sort branches out early. `where` (including the
+  /// no-empty-images filter above) still applies to both the trending
+  /// lookup and its pad query below.
   ///
   /// Graceful degradation: if there aren't enough trending hits to
   /// fill the page (early days, or the catalog just doesn't get
@@ -169,62 +185,19 @@ export async function findProducts(query: ListProductsQuery) {
     }
   })();
 
-  // Rank products with images above products without images, then
-  // apply the requested sort within each group. We do this with two
-  // parallel queries (with-images-first / empty-second) and stitch
-  // them across the page boundary. Reason: customers shouldn't see
-  // empty placeholders before products that already have photos —
-  // newly imported SKUs sit at the top of `createdAt DESC` until
-  // interns approve images, which made the storefront look broken.
   const skip = (query.page - 1) * query.limit;
   const take = query.limit;
 
-  const withImagesWhere: Prisma.ProductWhereInput = {
-    ...where,
-    NOT: { images: { isEmpty: true } },
-  };
-  const withoutImagesWhere: Prisma.ProductWhereInput = {
-    ...where,
-    images: { isEmpty: true },
-  };
-
-  const [withImagesCount, total] = await Promise.all([
-    prisma.product.count({ where: withImagesWhere }),
-    prisma.product.count({ where }),
-  ]);
-
-  const items: Awaited<ReturnType<typeof prisma.product.findMany>> = [];
-  if (skip < withImagesCount) {
-    const takeFromWith = Math.min(take, withImagesCount - skip);
-    const withItems = await prisma.product.findMany({
-      where: withImagesWhere,
+  const [items, total] = await Promise.all([
+    prisma.product.findMany({
+      where,
       orderBy,
       skip,
-      take: takeFromWith,
-      include: { category: true },
-    });
-    items.push(...withItems);
-    const remaining = take - items.length;
-    if (remaining > 0) {
-      const withoutItems = await prisma.product.findMany({
-        where: withoutImagesWhere,
-        orderBy,
-        skip: 0,
-        take: remaining,
-        include: { category: true },
-      });
-      items.push(...withoutItems);
-    }
-  } else {
-    const withoutItems = await prisma.product.findMany({
-      where: withoutImagesWhere,
-      orderBy,
-      skip: skip - withImagesCount,
       take,
       include: { category: true },
-    });
-    items.push(...withoutItems);
-  }
+    }),
+    prisma.product.count({ where }),
+  ]);
 
   return { items, total, page: query.page, limit: query.limit };
 }

@@ -39,7 +39,11 @@ export const upsertProductBodySchema = z.object({
   inStock: z.boolean().default(true),
   rating: z.number().min(0).max(5).default(0),
   reviewCount: z.number().int().nonnegative().default(0),
-  images: z.array(z.string()).default([]),
+  /// Real URLs only — see `image-url.ts` for why (this is the
+  /// Zod-schema-boundary check; `admin.bulk.ts` and
+  /// `product-submissions/service.ts` use the same underlying rule
+  /// for the two write paths that don't go through this schema).
+  images: z.array(z.string().url()).default([]),
   attributes: z.record(z.string(), z.unknown()).default({}),
   categorySlug: z.string().min(1).nullish(),
   placements: z.array(placementInputSchema).optional(),
