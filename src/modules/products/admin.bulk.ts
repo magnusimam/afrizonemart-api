@@ -2,6 +2,7 @@ import Papa from 'papaparse';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
+import { isImageUrl } from './image-url';
 import { syncProductVariants } from './variants';
 
 export interface BulkRowResult {
@@ -298,12 +299,21 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
         throw new Error(`origin must be a 2-letter code (got "${origin}")`);
       }
 
-      const images = row.images
+      // Root cause of a real incident (2026-08-17): a Rwanda batch's
+      // `images` column had bare filenames ("RW-ST-002.jpg") instead
+      // of uploaded URLs — this importer stored them verbatim, and
+      // the storefront card crashed rendering a non-URL `next/image`
+      // src. Only keep entries that look like a real URL; drop the
+      // rest and report the row so it's visible in the import
+      // summary instead of silently losing data.
+      const rawImages = row.images
         ? row.images
             .split('|')
             .map((s) => s.trim())
             .filter(Boolean)
         : [];
+      const images = rawImages.filter(isImageUrl);
+      const droppedImages = rawImages.filter((s) => !isImageUrl(s));
 
       const inStock = parseBool(row.inStock, true);
       const brand = row.brand?.trim() || null;
@@ -389,7 +399,14 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
           inStock: updatedRow.inStock,
         });
         updated++;
-        results.push({ row: rowNum, slug, status: 'updated' });
+        results.push({
+          row: rowNum,
+          slug,
+          status: 'updated',
+          ...(droppedImages.length > 0
+            ? { message: `Skipped ${droppedImages.length} invalid image entr${droppedImages.length === 1 ? 'y' : 'ies'} (not a URL): ${droppedImages.join(', ')}` }
+            : {}),
+        });
       } else {
         const createdRow = await prisma.product.create({
           data: {
@@ -406,7 +423,14 @@ export async function bulkUploadProducts(csv: string): Promise<BulkUploadResult>
           inStock: createdRow.inStock,
         });
         created++;
-        results.push({ row: rowNum, slug, status: 'created' });
+        results.push({
+          row: rowNum,
+          slug,
+          status: 'created',
+          ...(droppedImages.length > 0
+            ? { message: `Skipped ${droppedImages.length} invalid image entr${droppedImages.length === 1 ? 'y' : 'ies'} (not a URL): ${droppedImages.join(', ')}` }
+            : {}),
+        });
       }
     } catch (err) {
       errors++;

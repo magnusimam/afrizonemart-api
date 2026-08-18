@@ -1,6 +1,7 @@
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
 import { getDefaultPayRate } from '../intern/service';
+import { isImageUrl } from '../products/image-url';
 import { adminCreateProduct } from '../products/admin.service';
 import type {
   ListProductSubmissionsQuery,
@@ -242,6 +243,18 @@ export async function reviewProductSubmission(
 
   // Approve → create the live product. adminCreateProduct throws a
   // 409 if the slug is taken; let that surface to the reviewer.
+  //
+  // This call bypasses `upsertProductBodySchema`'s Zod validation
+  // (it hands `adminCreateProduct` an already-typed object, not raw
+  // `req.body`), so the "images must be real URLs" rule doesn't apply
+  // automatically here the way it does on the direct admin editor.
+  // Drafts are deliberately allowed loose image values while an
+  // intern is still working (see schema.ts's doc comment) — this is
+  // the "ready to publish" check the module's own docs promise runs
+  // at approval time. Filtered, not rejected: a bad entry shouldn't
+  // block an otherwise-good submission from publishing.
+  const validImages = sub.images.filter(isImageUrl);
+
   const created = await adminCreateProduct(
     {
       slug: sub.slug,
@@ -258,7 +271,7 @@ export async function reviewProductSubmission(
       inStock: true,
       rating: 0,
       reviewCount: 0,
-      images: sub.images,
+      images: validImages,
       attributes: (sub.attributes ?? {}) as Record<string, unknown>,
       categorySlug: sub.categorySlug ?? null,
     },
