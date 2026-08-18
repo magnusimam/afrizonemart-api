@@ -36,9 +36,31 @@ const prisma = new PrismaClient();
 const COMMIT = process.argv.includes('--commit');
 const REMOVE = process.argv.includes('--remove');
 const emailArg = process.argv.find((a) => a.startsWith('--email='));
+const sourceArg = process.argv.find((a) => a.startsWith('--source='));
+/**
+ * `source` decides which cohort the account belongs to, and therefore whether
+ * `invite-suppliers.ts` picks it up in a bulk send: that script's default
+ * targets `sheet-import`. Use --source=sheet-import to put your own address in
+ * the batch, so a real send proves itself by arriving in an inbox you can read.
+ *
+ * It stays "demo" by default because --remove refuses to delete anything not
+ * marked that way -- an escape hatch that only works if the marker is the norm.
+ */
+const SOURCE = (sourceArg ? sourceArg.slice('--source='.length) : 'demo').trim();
 const EMAIL = (emailArg ? emailArg.slice('--email='.length) : 'demo@afrizonemart.com')
   .trim()
   .toLowerCase();
+
+/**
+ * The real marker for "this script made it".
+ *
+ * `source` cannot do that job any more: --source=sheet-import exists precisely
+ * so the account joins the bulk-invite cohort, which makes it indistinguishable
+ * from a real imported supplier by source alone. The company name is written by
+ * this script on every path, so it identifies its own rows without ever
+ * matching a genuine one.
+ */
+const DEMO_COMPANY = 'Afrizonemart Demo Supplier';
 
 /** Readable but strong: base64url of 18 random bytes, ~144 bits. */
 function generatePassword(): string {
@@ -91,6 +113,7 @@ async function create() {
   console.log(`Email          ${EMAIL}`);
   console.log(`Password       ${fromEnv ? '(from DEMO_SUPPLIER_PASSWORD)' : '(generated)'}`);
   console.log(`Stage          10 — every stage open`);
+  console.log(`Source         ${SOURCE}${SOURCE === 'sheet-import' ? '  (INCLUDED in bulk invites)' : '  (excluded from bulk invites)'}`);
   console.log(`Orientation    countdown left gated (no stage-5 completedAt)`);
   console.log(`Action         ${existing ? 'update existing demo account' : 'create'}`);
 
@@ -115,16 +138,16 @@ async function create() {
 
   await prisma.supplierProfile.upsert({
     where: { userId: user.id },
-    update: { currentStage: 10, status: 'ACTIVE', source: 'demo' },
+    update: { companyName: DEMO_COMPANY, currentStage: 10, status: 'ACTIVE', source: SOURCE },
     create: {
       userId: user.id,
-      companyName: 'Afrizonemart Demo Supplier',
+      companyName: DEMO_COMPANY,
       contactName: 'Demo Supplier',
       country: 'Nigeria',
       category: 'Food & Beverage',
       currentStage: 10,
       status: 'ACTIVE',
-      source: 'demo',
+      source: SOURCE,
     },
   });
 
