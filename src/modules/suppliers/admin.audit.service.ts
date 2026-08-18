@@ -401,10 +401,27 @@ export async function authoriseAudit(
   // turn a completed authorisation into a failed request. Worst case the
   // supplier gets the verdict email without an attachment and reads the report
   // in the portal.
-  const report = buildReportFor(supplier, updated, signedBy);
-  const pdf = report ? await renderReportPdf(report) : null;
-  if (report && !pdf) {
-    logger.warn('supplier.audit.pdf_unavailable', { supplierId });
+  // An audit carrying `reportFileUrl` was issued as a document before the
+  // portal could generate one. That file is what the QA team signed, so it is
+  // what the supplier receives: a regenerated PDF would be a different
+  // artefact making the same claims, and for a verdict that decides whether a
+  // business can list, "equivalent" is not the same as "the one you signed".
+  let attachment: { filename: string; content: Buffer } | null = null;
+  let report: ReturnType<typeof buildReportFor> = null;
+
+  if (updated.reportFileUrl) {
+    attachment = await fetchIssuedReport(
+      updated.reportFileUrl,
+      updated.reportFileName ?? 'Afrizonemart-Diagnostic-Report',
+      supplierId,
+    );
+  } else {
+    report = buildReportFor(supplier, updated, signedBy);
+    const pdf = report ? await renderReportPdf(report) : null;
+    if (report && !pdf) {
+      logger.warn('supplier.audit.pdf_unavailable', { supplierId });
+    }
+    if (pdf) attachment = pdf;
   }
 
   await notifyAuditComplete({
@@ -413,7 +430,7 @@ export async function authoriseAudit(
     recipientName: supplier.user.name ?? supplier.contactName,
     outcome,
     indicativeScore: updated.indicativeScore ?? 0,
-    reportPdf: pdf ?? undefined,
+    reportPdf: attachment ?? undefined,
   });
 
   await notifyAuditReportFiled({
@@ -424,7 +441,7 @@ export async function authoriseAudit(
     indicativeScore: updated.indicativeScore ?? 0,
     signedBy,
     documentCode: report?.meta.documentCode ?? `${updated.protocolCode ?? 'AFZ-QA'} / ${supplierId}`,
-    reportPdf: pdf ?? undefined,
+    reportPdf: attachment ?? undefined,
   });
 
   return toPublicAudit(supplierId, updated);
@@ -447,6 +464,36 @@ function adminReportRecipients(): string[] {
  * Returns null for audits predating checklist resolution; those still get their
  * email, just without an attachment.
  */
+
+/**
+ * Pull the issued report document back out of storage so it can be attached.
+ *
+ * Best-effort, like every step after the signature: the audit is already
+ * authorised and recorded by this point, so a storage hiccup must not turn a
+ * completed authorisation into a failed request. If it fails the supplier
+ * still gets the verdict and can download the report from the portal.
+ */
+async function fetchIssuedReport(
+  url: string,
+  filename: string,
+  supplierId: string,
+): Promise<{ filename: string; content: Buffer } | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      logger.warn('supplier.audit.report_fetch_failed', { supplierId, status: res.status });
+      return null;
+    }
+    return { filename, content: Buffer.from(await res.arrayBuffer()) };
+  } catch (err) {
+    logger.warn('supplier.audit.report_fetch_error', {
+      supplierId,
+      error: (err as Error).message,
+    });
+    return null;
+  }
+}
+
 function buildReportFor(
   supplier: { companyName: string; category: string | null },
   audit: SupplierAudit,

@@ -319,6 +319,14 @@ export interface PublicSupplierAudit {
   /// The category template (sections + checkpoints) so the supplier can see
   /// the full matrix with requirement labels alongside their ratings.
   template: ReturnType<typeof getAuditTemplate>;
+  /// The issued report document, when the audit has one on file.
+  ///
+  /// The first cohort of diagnostics was written in Word before the portal
+  /// could generate reports, and the supplier is entitled to the document
+  /// that was actually signed rather than a reconstruction of it. Null for
+  /// audits whose report the engine generates.
+  reportFileUrl: string | null;
+  reportFileName: string | null;
 }
 
 /**
@@ -351,6 +359,8 @@ export async function getAudit(userId: string): Promise<PublicSupplierAudit | nu
     approvedAt: a.approvedAt.toISOString(),
     responses: (a.responses as Record<string, { rating?: string; findings?: string }>) ?? {},
     capa: (a.capa as unknown[]) ?? [],
+    reportFileUrl: a.reportFileUrl ?? null,
+    reportFileName: a.reportFileName ?? null,
     template,
   };
 }
