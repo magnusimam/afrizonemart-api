@@ -1,9 +1,17 @@
 import { Prisma, type SupplierAudit } from '@prisma/client';
+import { env } from '@/config/env';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
-import { notifyAuditComplete } from './notify';
+import { logger } from '@/infra/logger';
+import { notifyAuditComplete, notifyAuditReportFiled } from './notify';
 import { AUDIT_TEMPLATES, getAuditTemplate, templateCheckpointIds } from './audit-templates';
-import type { CompleteAuditBody, SaveAuditBody } from './audit.schema';
+import { scoreAssessment } from './assessment/scoring';
+import { checkCompleteness, resolveChecklist, type ResolvedChecklist } from './assessment/resolver';
+import { allProductClasses, getProtocol, protocolFor } from './assessment/protocols';
+import { buildReport, type DiagnosticReport } from './assessment/report';
+import { renderReportPdf } from './assessment/pdf';
+import { emptyProfile, type AssessmentProfile } from './assessment/profile';
+import type { CompleteAuditBody, IssueChecklistBody, SaveAuditBody } from './audit.schema';
 
 /**
  * Quality & Compliance — the digitized Supplier Product-Commodity Audit.
@@ -24,30 +32,31 @@ export interface AuditCounts {
   na: number;
 }
 
-/** Indicative score + verdict, mirroring the shipped diagnostic reports:
- *  100 − 2·Major − 0.5·Minor; any Critical ⇒ REJECTED. */
+/**
+ * Indicative score + verdict.
+ *
+ * Delegates to the assessment scorer, which is a pure function tested against
+ * the twelve diagnostic reports AZM has already published. Three behaviours
+ * changed when this moved across, each of them a correction rather than a
+ * choice:
+ *
+ * 1. THE SCORE KEEPS HALVES. It used to be rounded to an integer, because the
+ *    column was an Int. Oluwatoyin's shipped report scores 94.5 — rounding made
+ *    the stored record disagree with the document sent to the supplier.
+ * 2. MAJOR SEVERITY IS PER FINDING. The protocol gives the auditor a 1–3 band;
+ *    this used to hard-code 2. Ritzy's findings average 1.92, so auditors do
+ *    use the band.
+ * 3. THE ≤3 MAJOR CAP NOW GATES PROVISIONAL TOO. The scoring legend printed in
+ *    every report says "no more than three permitted for any approval outcome",
+ *    and a conditional listing is an approval outcome — a facility with twelve
+ *    Majors should not earn one on arithmetic alone.
+ */
 export function scoreAudit(responses: ResponseMap): {
   counts: AuditCounts;
   indicativeScore: number;
   outcome: 'APPROVED' | 'PROVISIONAL' | 'REJECTED';
 } {
-  const counts: AuditCounts = { critical: 0, major: 0, minor: 0, observation: 0, compliant: 0, na: 0 };
-  for (const r of Object.values(responses)) {
-    switch (r.rating) {
-      case 'C': counts.critical++; break;
-      case 'M': counts.major++; break;
-      case 'Mi': counts.minor++; break;
-      case 'O': counts.observation++; break;
-      case 'Cpt': counts.compliant++; break;
-      case 'NA': counts.na++; break;
-    }
-  }
-  const indicativeScore = Math.max(0, Math.min(100, Math.round(100 - 2 * counts.major - 0.5 * counts.minor)));
-  let outcome: 'APPROVED' | 'PROVISIONAL' | 'REJECTED';
-  if (counts.critical > 0) outcome = 'REJECTED';
-  else if (indicativeScore >= 85 && counts.major <= 3) outcome = 'APPROVED';
-  else if (indicativeScore >= 70) outcome = 'PROVISIONAL';
-  else outcome = 'REJECTED';
+  const { counts, indicativeScore, outcome } = scoreAssessment(responses);
   return { counts, indicativeScore, outcome };
 }
 
@@ -70,6 +79,20 @@ export interface PublicAudit {
   recommendations: string | null;
   auditorName: string | null;
   conductedAt: string | null;
+  /** Lead-auditor sign-off. `approvedAt === null` means not yet released. */
+  signedBy: string | null;
+  approvedAt: string | null;
+  /**
+   * The protocol and the frozen checklist this audit was carried out against.
+   *
+   * The admin editor renders from this rather than re-fetching a category
+   * template: responses are keyed by checkpoint ref (`B.4`), whereas the legacy
+   * templates key by generated id (`A_s0_1`), so rendering the template against
+   * these responses silently shows every checkpoint as unrated.
+   */
+  protocolCode: string | null;
+  protocolVersion: string | null;
+  checklistSnapshot: unknown | null;
 }
 
 function toPublicAudit(supplierId: string, a: SupplierAudit | null): PublicAudit {
@@ -88,6 +111,11 @@ function toPublicAudit(supplierId: string, a: SupplierAudit | null): PublicAudit
     recommendations: a?.recommendations ?? null,
     auditorName: a?.auditorName ?? null,
     conductedAt: a?.conductedAt ? a.conductedAt.toISOString() : null,
+    signedBy: a?.signedBy ?? null,
+    approvedAt: a?.approvedAt ? a.approvedAt.toISOString() : null,
+    protocolCode: a?.protocolCode ?? null,
+    protocolVersion: a?.protocolVersion ?? null,
+    checklistSnapshot: a?.checklistSnapshot ?? null,
   };
 }
 
@@ -182,6 +210,63 @@ async function refuseIfCompleted(supplierId: string): Promise<void> {
   }
 }
 
+/**
+ * POST /:supplierId/checklist — resolve and issue the customised checklist.
+ *
+ * This is the step that replaces a coordinator reading a PIQ and choosing a
+ * form. It runs once, and the result is frozen onto the audit together with the
+ * protocol version and the facts it was derived from.
+ *
+ * Re-issuing is refused once the audit is completed for the same reason edits
+ * are: the checklist is part of the evidence, and swapping it under a signed
+ * result would leave a report citing checkpoints nobody was assessed against.
+ */
+export async function issueChecklist(supplierId: string, body: IssueChecklistBody) {
+  await supplierOrThrow(supplierId);
+  await refuseIfCompleted(supplierId);
+
+  const protocol = protocolFor(body.productClass);
+  if (!protocol) {
+    throw HttpError.badRequest(
+      `No assessment protocol covers "${body.productClass}". Known classes: ${allProductClasses().join(', ')}.`,
+    );
+  }
+
+  const profile: AssessmentProfile = {
+    ...emptyProfile(body.productClass),
+    ...body.profile,
+  } as AssessmentProfile;
+
+  const checklist = resolveChecklist(protocol, profile);
+
+  const a = await prisma.supplierAudit.upsert({
+    where: { supplierId },
+    update: {
+      protocolCode: protocol.code,
+      protocolVersion: protocol.version,
+      checklistSnapshot: checklist as unknown as Prisma.InputJsonValue,
+      assessmentProfile: profile as unknown as Prisma.InputJsonValue,
+    },
+    create: {
+      supplierId,
+      status: 'DRAFT',
+      protocolCode: protocol.code,
+      protocolVersion: protocol.version,
+      checklistSnapshot: checklist as unknown as Prisma.InputJsonValue,
+      assessmentProfile: profile as unknown as Prisma.InputJsonValue,
+    },
+  });
+
+  logger.info('supplier.audit.checklist_issued', {
+    supplierId,
+    protocol: protocol.code,
+    included: checklist.items.length,
+    excluded: checklist.excluded.length,
+  });
+
+  return { audit: toPublicAudit(supplierId, a), checklist };
+}
+
 export async function saveAudit(supplierId: string, body: SaveAuditBody) {
   await supplierOrThrow(supplierId);
   await refuseIfCompleted(supplierId);
@@ -201,11 +286,45 @@ export async function completeAudit(supplierId: string, body: CompleteAuditBody)
   const template = getAuditTemplate(body.category);
   if (!template) throw HttpError.badRequest('Unknown audit category.');
 
-  // Every checkpoint must carry a rating before completion.
-  const ids = templateCheckpointIds(body.category);
-  const missing = ids.filter((id) => !body.responses[id]?.rating);
-  if (missing.length > 0) {
-    throw HttpError.badRequest(`Rate all checkpoints before completing — ${missing.length} still unrated.`);
+  /**
+   * Completion is judged against the checklist that was actually ISSUED, not
+   * against the whole category catalogue.
+   *
+   * The catalogue-wide check is what breaks under customisation: a supplier
+   * whose product makes fourteen checkpoints inapplicable — ZAO, single-
+   * ingredient cold-pressed coconut oil — could never be completed, because the
+   * cassava and fortification checkpoints they were never shown would count as
+   * unrated forever.
+   *
+   * Falls back to the catalogue-wide check for audits created before checklists
+   * were resolved, so existing drafts still complete.
+   */
+  const existing = await prisma.supplierAudit.findUnique({
+    where: { supplierId },
+    select: { checklistSnapshot: true },
+  });
+  const checklist = existing?.checklistSnapshot as ResolvedChecklist | null;
+
+  if (checklist?.items?.length) {
+    const { complete, missing, unjustified } = checkCompleteness(checklist, body.responses);
+    if (!complete) {
+      if (missing.length > 0) {
+        throw HttpError.badRequest(
+          `Rate all checkpoints before completing — ${missing.length} still unrated (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '…' : ''}).`,
+        );
+      }
+      // Rating a checkpoint above its documented default is a judgement call,
+      // and an unexplained one is not defensible to the supplier it downgrades.
+      throw HttpError.badRequest(
+        `Explain the severity chosen for ${unjustified.join(', ')} — each is rated above the protocol default.`,
+      );
+    }
+  } else {
+    const ids = templateCheckpointIds(body.category);
+    const missing = ids.filter((id) => !body.responses[id]?.rating);
+    if (missing.length > 0) {
+      throw HttpError.badRequest(`Rate all checkpoints before completing — ${missing.length} still unrated.`);
+    }
   }
 
   const { counts, indicativeScore, outcome } = scoreAudit(body.responses as ResponseMap);
@@ -226,13 +345,145 @@ export async function completeAudit(supplierId: string, body: CompleteAuditBody)
     });
   }
 
+  // NO EMAIL HERE — deliberately.
+  //
+  // Completing an audit means every checkpoint is rated; it does not mean a
+  // lead auditor has stood behind the result. The supplier is notified from
+  // `authoriseAudit` below, once someone has signed it. Sending here would
+  // deliver a verdict to a real business before any human had approved it.
+  return toPublicAudit(supplierId, a);
+}
+
+/**
+ * The human review gate: a lead auditor types their legal name to authorise a
+ * completed audit, and only then is the report released to the supplier.
+ *
+ * Idempotent by design — re-authorising an already-authorised audit is a no-op
+ * rather than a second email to the supplier.
+ */
+export async function authoriseAudit(
+  supplierId: string,
+  input: { signedBy: string },
+  approvedById: string,
+) {
+  const supplier = await prisma.supplierProfile.findUnique({
+    where: { id: supplierId },
+    include: { user: { select: { email: true, name: true } }, audit: true },
+  });
+  if (!supplier) throw HttpError.notFound('Supplier not found');
+
+  const audit = supplier.audit;
+  if (!audit) throw HttpError.badRequest('This supplier has no audit to authorise.');
+  if (audit.status !== 'COMPLETED') {
+    throw HttpError.badRequest('Complete the audit before authorising it.');
+  }
+  if (audit.approvedAt) {
+    // Already released — return current state rather than re-notifying.
+    return toPublicAudit(supplierId, audit);
+  }
+
+  const signedBy = input.signedBy.trim();
+  if (signedBy.length < 3) {
+    throw HttpError.badRequest('Enter your full name as your signature.');
+  }
+
+  const updated = await prisma.supplierAudit.update({
+    where: { supplierId },
+    data: { signedBy, approvedById, approvedAt: new Date() },
+  });
+
+  logger.info('supplier.audit.authorised', { supplierId, approvedById, signedBy });
+
+  const outcome = (updated.outcome ?? 'PROVISIONAL') as 'APPROVED' | 'PROVISIONAL' | 'REJECTED';
+
+  // Build and print the report. Every step here is best-effort: the audit is
+  // already signed and recorded, so nothing below may throw its way out and
+  // turn a completed authorisation into a failed request. Worst case the
+  // supplier gets the verdict email without an attachment and reads the report
+  // in the portal.
+  const report = buildReportFor(supplier, updated, signedBy);
+  const pdf = report ? await renderReportPdf(report) : null;
+  if (report && !pdf) {
+    logger.warn('supplier.audit.pdf_unavailable', { supplierId });
+  }
+
   await notifyAuditComplete({
     to: supplier.user.email,
     userId: supplier.userId,
     recipientName: supplier.user.name ?? supplier.contactName,
     outcome,
-    indicativeScore,
+    indicativeScore: updated.indicativeScore ?? 0,
+    reportPdf: pdf ?? undefined,
   });
 
-  return toPublicAudit(supplierId, a);
+  await notifyAuditReportFiled({
+    recipients: adminReportRecipients(),
+    supplierName: supplier.companyName,
+    supplierId,
+    outcome,
+    indicativeScore: updated.indicativeScore ?? 0,
+    signedBy,
+    documentCode: report?.meta.documentCode ?? `${updated.protocolCode ?? 'AFZ-QA'} / ${supplierId}`,
+    reportPdf: pdf ?? undefined,
+  });
+
+  return toPublicAudit(supplierId, updated);
+}
+
+/** Configured QA recipients, falling back to the supplier-desk inbox so a
+ *  released report always leaves an internal copy behind. */
+function adminReportRecipients(): string[] {
+  const configured = env.ASSESSMENT_REPORT_ADMIN_RECIPIENTS ?? env.EMAIL_REPLY_TO ?? '';
+  return configured.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Rebuild the diagnostic report from what was stored on the audit.
+ *
+ * Reads the frozen `checklistSnapshot` rather than re-resolving, so the
+ * document reflects the checklist the auditor actually worked from — not what
+ * the current catalogue would produce for the same supplier today.
+ *
+ * Returns null for audits predating checklist resolution; those still get their
+ * email, just without an attachment.
+ */
+function buildReportFor(
+  supplier: { companyName: string; category: string | null },
+  audit: SupplierAudit,
+  signedBy: string,
+): DiagnosticReport | null {
+  const checklist = audit.checklistSnapshot as unknown as ResolvedChecklist | null;
+  if (!checklist?.items?.length || !audit.protocolCode) return null;
+
+  const protocol = getProtocol(audit.protocolCode);
+  if (!protocol) {
+    logger.warn('supplier.audit.protocol_missing', { protocolCode: audit.protocolCode });
+    return null;
+  }
+
+  try {
+    const report = buildReport({
+      protocol,
+      checklist,
+      responses: (audit.responses ?? {}) as Record<string, never>,
+      supplierName: supplier.companyName,
+      supplierSlug: audit.reportSlug ?? fallbackSlug(supplier.companyName),
+      productDescriptor: supplier.category ?? 'Supplier',
+      issuedAt: audit.approvedAt ?? new Date(),
+    });
+    // The signature belongs on the released document.
+    report.signOff.statement += ` Authorised by ${signedBy}.`;
+    return report;
+  } catch (error) {
+    logger.error('supplier.audit.report_build_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/** Used only when no slug was recorded. Deliberately crude — the point of the
+ *  stored column is that no rule reproduces the real ones. */
+function fallbackSlug(companyName: string): string {
+  return companyName.replace(/[^A-Za-z0-9]+/g, '').slice(0, 12).toUpperCase() || 'SUPPLIER';
 }

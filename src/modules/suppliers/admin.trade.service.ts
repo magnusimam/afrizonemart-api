@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/infra/prisma';
 import { HttpError } from '@/middleware/error-handler';
 import { toPublicPO } from './trade.service';
-import { notifyListingPublished, notifyPOIssued } from './notify';
+import { notifyListingPublished, notifyPOIssued, notifyTradeEngagement } from './notify';
 
 /**
  * Activation & Procurement admin (gated `suppliers.trade`). Two surfaces:
@@ -61,6 +61,17 @@ export async function publishListing(supplierId: string) {
     to: supplier.user.email,
     userId: supplier.userId,
     recipientName: supplier.user.name ?? supplier.contactName,
+  });
+
+  // Publishing is also the moment they reach Stage 9 (Trade Engagement), so the
+  // congratulations email belongs here rather than on a separate trigger.
+  // `notifyTradeEngagement` is once-ever guarded, so re-publishing a listing
+  // won't congratulate the same supplier twice.
+  await notifyTradeEngagement({
+    to: supplier.user.email,
+    userId: supplier.userId,
+    recipientName: supplier.user.name ?? supplier.contactName,
+    companyName: supplier.companyName,
   });
 
   return { supplierId, publishedAt: all['8'].publishedAt };

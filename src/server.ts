@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import { corsOrigins, env, isDevelopment } from '@/config/env';
+import { closePdfBrowser } from '@/modules/suppliers/assessment/pdf';
 import { logger } from '@/infra/logger';
 import { initSentry, Sentry } from '@/infra/sentry';
 import { connectDatabase, disconnectDatabase } from '@/infra/prisma';
@@ -62,6 +63,7 @@ import { startTelegramDispatcher } from '@/modules/notifications/telegram-dispat
 import { startPushDispatcher } from '@/modules/notifications/push-dispatcher';
 import { startCourierAutoMarkCron } from '@/modules/courier/auto-mark-cron';
 import { startReviewNudgeCron } from '@/modules/reviews/review-nudge-cron';
+import { startSupplierLifecycleCron } from '@/modules/suppliers/lifecycle-cron';
 import {
   startWrapAggregationCron,
   startWrapPublishCron,
@@ -313,6 +315,8 @@ async function start() {
   startPushDispatcher();
   startCourierAutoMarkCron();
   startReviewNudgeCron();
+  /// Dry-run unless SUPPLIER_LIFECYCLE_SEND=1 — see lifecycle-cron.ts header.
+  startSupplierLifecycleCron();
   startWrapAggregationCron();
   startWrapPublishCron();
   initServerAnalytics();
@@ -345,6 +349,10 @@ async function start() {
 
 async function shutdown(signal: string) {
   logger.info('server.shutdown', { signal });
+  // Chromium is launched lazily for report PDFs and is a child process — it
+  // outlives the API unless closed here, and orphaned browsers accumulate
+  // across restarts until the box runs out of memory.
+  await closePdfBrowser().catch(() => undefined);
   await disconnectDatabase();
   process.exit(0);
 }

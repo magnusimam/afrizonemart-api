@@ -115,7 +115,13 @@ export type Capability =
   | 'suppliers.review'
   | 'suppliers.visits'
   | 'suppliers.audit'
-  | 'suppliers.trade';
+  | 'suppliers.trade'
+  /// Take50 production team — the crew who shoot supplier product content.
+  /// Deliberately its own capability rather than folding into
+  /// `suppliers.trade`: Take50 need to book and run shoots, but have no
+  /// business publishing listings or issuing purchase orders, and several of
+  /// them are contractors rather than AZM procurement staff.
+  | 'suppliers.production';
 
 export type StaffRole = 'CUSTOMER' | 'SELLER' | 'ADMIN' | 'STAFF';
 
@@ -168,6 +174,7 @@ export const CAPABILITY_LABELS: Record<Capability, { domain: string; label: stri
   'suppliers.visits': { domain: 'Suppliers', label: 'Facility-visit team — schedule & confirm supplier site visits' },
   'suppliers.audit': { domain: 'Suppliers', label: 'Quality & Compliance — conduct product-commodity audits & issue reports' },
   'suppliers.trade': { domain: 'Suppliers', label: 'Activation & Procurement — publish listings & issue purchase orders' },
+  'suppliers.production': { domain: 'Suppliers', label: 'Take50 production — book & run supplier content shoots' },
 };
 
 export const ALL_CAPABILITIES: Capability[] = Object.keys(CAPABILITY_LABELS) as Capability[];

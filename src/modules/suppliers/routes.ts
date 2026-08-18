@@ -13,6 +13,7 @@ import {
   getPIQHandler,
   getReviewCallHandler,
   getStageHandler,
+  getProductionBookingHandler,
   getVisitHandler,
   postOrientationCommentHandler,
   rescheduleReviewCallHandler,
@@ -84,6 +85,7 @@ supplierRoutes.patch('/me', requireAuth, asyncHandler(updateMeHandler));
 supplierRoutes.get('/me/visit', requireAuth, asyncHandler(getVisitHandler));
 supplierRoutes.post('/me/visit/request', requireAuth, asyncHandler(requestVisitHandler));
 supplierRoutes.get('/me/audit', requireAuth, asyncHandler(getAuditHandler));
+supplierRoutes.get('/me/production', requireAuth, asyncHandler(getProductionBookingHandler));
 supplierRoutes.post('/me/listing-photo', requireAuth, withUpload(photoUpload.single('file')), asyncHandler(uploadListingPhotoHandler));
 /// Journey-form attachments: images AND PDFs (licences, certifications).
 supplierRoutes.post('/me/document', requireAuth, withUpload(docUpload.single('file')), asyncHandler(uploadSupplierDocumentHandler));

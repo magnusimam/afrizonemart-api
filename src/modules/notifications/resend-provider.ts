@@ -28,6 +28,34 @@ export class ResendEmailProvider implements EmailProvider {
       text: message.text,
       replyTo: message.replyTo,
       tags: message.tags,
+      /**
+       * Headers that mark this as one-to-one transactional mail rather than a
+       * campaign — the difference between Gmail's Primary tab and Promotions.
+       *
+       * `Auto-Submitted: auto-generated` (RFC 3834) states plainly that this
+       * was generated in response to something the recipient did.
+       *
+       * `X-Entity-Ref-ID` gives each message a distinct identity so Gmail
+       * doesn't roll similar messages into one promotional thread.
+       *
+       * Deliberately NOT set: `List-Unsubscribe` and `Precedence: bulk`. Both
+       * are correct for campaigns and actively harmful here — they tell Gmail
+       * this is bulk mail, which is the classification we are trying to avoid.
+       * A purchase order or a password-change notice is not something a
+       * supplier can opt out of.
+       */
+      headers: {
+        'Auto-Submitted': 'auto-generated',
+        'X-Entity-Ref-ID': `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        ...message.headers,
+      },
+      // Resend takes `content` as a Buffer or base64 string; our EmailAttachment
+      // allows either, so pass it straight through.
+      attachments: message.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     });
 
     if (error) {

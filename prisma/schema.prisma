@@ -179,6 +179,8 @@ model User {
   /// having this profile (no separate role/login). Its existence is
   /// what RequireSupplier gates on. Existing AZM users keep one login.
   supplierProfile         SupplierProfile?         @relation("UserSupplier")
+  auditsApproved          SupplierAudit[]          @relation("AuditApprover")
+  productionsBooked       ProductionBooking[]      @relation("ProductionBooker")
 
   @@index([email])
   @@index([phone])
@@ -2353,6 +2355,7 @@ model SupplierProfile {
   facilityVisit FacilityVisit?
   audit         SupplierAudit?
   reviewCall    ReviewCall?
+  productionBooking ProductionBooking?
   orientationComments OrientationComment[]
   purchaseOrders PurchaseOrder[]
 
@@ -2474,10 +2477,68 @@ model FacilityVisit {
   leadPhone      String?
   notes          String?
 
+  /// ── On-site visit form ────────────────────────────────────────────
+  /// Filled by the visiting team, matched to the supplier's product
+  /// category so the questions asked are the ones that matter for that
+  /// product type. Its results seed the product audit.
+
+  /// Which category template the form was filled against ('A'..'F').
+  /// Snapshotted rather than read live off SupplierProfile.category: a
+  /// supplier can be re-categorised later, and the visit record must keep
+  /// showing what was actually assessed on the day.
+  formCategory   String?
+  /// Pre-visit document checklist ticks: { docLabel: boolean }. Handed
+  /// straight to SupplierAudit.preVisitDocs so the auditor doesn't re-tick
+  /// paperwork the visiting team already sighted.
+  docsSighted    Json?
+  /// Per-category observations: { checkId: { seen: boolean, note: string } }.
+  observations   Json?
+  /// Free-text summary the auditor reads before scoring.
+  visitSummary   String?
+  /// Set when the team submits the form — distinct from `status
+  /// = COMPLETED`, which only means the visit happened.
+  formSubmittedAt DateTime?
+
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
   @@index([status])
+}
+
+enum ProductionBookingStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+/// Stage 8 — the Take50 content shoot. One per supplier: the production crew
+/// book a date, the supplier is emailed the call sheet, and the crew mark it
+/// complete once the photography is captured. Gated by `suppliers.production`
+/// rather than `suppliers.trade` — Take50 run shoots but never publish
+/// listings or issue purchase orders.
+model ProductionBooking {
+  id           String                  @id @default(cuid())
+  supplierId   String                  @unique
+  supplier     SupplierProfile         @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  status       ProductionBookingStatus @default(SCHEDULED)
+  scheduledAt  DateTime
+  location     String?
+  contactName  String?
+  contactPhone String?
+  /// Which products/variants are being shot, free text from the crew.
+  productList  String?
+  notes        String?
+
+  completedAt  DateTime?
+  bookedById   String?
+  bookedBy     User?                   @relation("ProductionBooker", fields: [bookedById], references: [id], onDelete: SetNull)
+
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  @@index([status])
+  @@index([scheduledAt])
 }
 
 /// Per-criterion verdict on the Supplier Product-Commodity Audit (SP-CA).
@@ -2504,8 +2565,22 @@ model SupplierAudit {
   supplier   SupplierProfile @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 
   status     AuditStatus     @default(DRAFT)
-  /// Which template/category: 'A'..'F'.
+  /// Legacy template/category: 'A'..'F'. Superseded by protocolCode.
   category   String?
+
+  /// The protocol this audit was carried out against, e.g. 'AFZ-QA-FPS-001'.
+  protocolCode    String?
+  protocolVersion String?
+  /// The resolved checklist, frozen at issue: which checkpoints applied and why.
+  /// Never recomputed — a later catalogue edit must not change a past audit.
+  checklistSnapshot Json?
+  /// The product facts the checklist was resolved from.
+  assessmentProfile Json?
+  /// Short code used in the report's document number (AFZ-QA-FPS-001 /
+  /// DR-<SLUG>-001). Stored rather than derived: the shipped reports are
+  /// inconsistent (Eden Foods -> EDEN, Oluwatoyin Integrated Farms -> ZAO),
+  /// so no rule reproduces them.
+  reportSlug        String?
 
   /// Scope/metadata fields (facility location/type, intended market, products…).
   metadata     Json?
@@ -2516,8 +2591,9 @@ model SupplierAudit {
   /// CAPA tracker rows.
   capa         Json?
 
-  /// Computed on complete.
-  indicativeScore Int?
+  /// Computed on complete. Carries halves — the methodology deducts 0.5 per
+  /// Minor finding, so an odd Minor count lands on a half (ZAO scored 94.5).
+  indicativeScore Float?
   /// Finding counts: { critical, major, minor, observation, compliant, na }.
   counts          Json?
   outcome         AuditOutcome?
@@ -2526,13 +2602,39 @@ model SupplierAudit {
   summary         String?
   recommendations String?
 
+  /// The report document as issued, when one exists as a file.
+  ///
+  /// The first cohort of diagnostic reports was written in Word before the
+  /// portal could generate them, and the supplier must be able to read exactly
+  /// the document that was signed - not a re-render that might differ from it.
+  /// The key is a random path rather than the company name: these carry a
+  /// "Confidential - Restricted Distribution" classification, so the URL must
+  /// not be guessable from the supplier's name.
+  reportFileUrl  String?
+  reportFileName String?
+  reportFileType String?
+
   auditorName String?
   conductedAt DateTime?
+
+  /// Lead-auditor sign-off — the human review gate.
+  ///
+  /// Completing an audit (all checkpoints rated) is NOT the same as releasing
+  /// it. A completed audit sits unauthorised until a lead auditor types their
+  /// legal name and approves; only then does the supplier get the report email.
+  /// Gating on `approvedAt` rather than a new AuditStatus value keeps every
+  /// existing `status: COMPLETED` query working unchanged.
+  signedBy     String?
+  approvedAt   DateTime?
+  approvedById String?
+  approvedBy   User?     @relation("AuditApprover", fields: [approvedById], references: [id], onDelete: SetNull)
 
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
   @@index([status])
+  @@index([approvedAt])
+  @@index([protocolCode])
 }
 
 enum PIQStatus {

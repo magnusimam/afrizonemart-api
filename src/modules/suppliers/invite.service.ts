@@ -43,8 +43,14 @@ export async function sendSupplierInvite(userId: string): Promise<string> {
     },
   });
 
-  const setPasswordUrl = `${env.WEB_URL}/supplier/set-password?token=${token}`;
-  const loginUrl = `${env.WEB_URL}/supplier/login`;
+  // EMAIL_LINK_BASE, not WEB_URL — same rule as notify.ts. WEB_URL is whatever
+  // the local dev server happens to be, and this is the one email where a
+  // localhost link is unrecoverable: the token is single-use and is consumed
+  // whether or not the link worked, so a bad base burns the invite for every
+  // supplier it reached. EMAIL_LINK_BASE defaults to the public site.
+  const linkBase = env.EMAIL_LINK_BASE.replace(/\/$/, '');
+  const setPasswordUrl = `${linkBase}/supplier/set-password?token=${token}`;
+  const loginUrl = `${linkBase}/supplier/login`;
 
   await sendEmail({
     type: 'supplier.invite',

@@ -1,10 +1,17 @@
 import type { Response } from 'express';
 import { z } from 'zod';
 import type { AuthedRequest } from '@/middleware/auth';
-import { completeAuditBodySchema, saveAuditBodySchema } from './audit.schema';
 import {
+  authoriseAuditBodySchema,
+  completeAuditBodySchema,
+  issueChecklistBodySchema,
+  saveAuditBodySchema,
+} from './audit.schema';
+import {
+  authoriseAudit,
   completeAudit,
   getAuditForAdmin,
+  issueChecklist,
   listAuditQueue,
   listAuditTemplates,
   saveAudit,
@@ -34,6 +41,16 @@ export async function getAuditHandler(req: AuthedRequest, res: Response): Promis
   res.json(await getAuditForAdmin(supplierId));
 }
 
+/**
+ * POST /:supplierId/checklist — resolve the customised checklist for this
+ * supplier's product and freeze it onto the audit.
+ */
+export async function issueChecklistHandler(req: AuthedRequest, res: Response): Promise<void> {
+  const { supplierId } = idParam.parse(req.params);
+  const body = issueChecklistBodySchema.parse(req.body);
+  res.json(await issueChecklist(supplierId, body));
+}
+
 export async function saveAuditHandler(req: AuthedRequest, res: Response): Promise<void> {
   const { supplierId } = idParam.parse(req.params);
   const body = saveAuditBodySchema.parse(req.body);
@@ -44,4 +61,16 @@ export async function completeAuditHandler(req: AuthedRequest, res: Response): P
   const { supplierId } = idParam.parse(req.params);
   const body = completeAuditBodySchema.parse(req.body);
   res.json(await completeAudit(supplierId, body));
+}
+
+/**
+ * POST /:supplierId/authorise — lead auditor signs off, releasing the report
+ * to the supplier. The signature is attributed to the authenticated user, not
+ * to whatever id the client sends.
+ */
+export async function authoriseAuditHandler(req: AuthedRequest, res: Response): Promise<void> {
+  const { supplierId } = idParam.parse(req.params);
+  const body = authoriseAuditBodySchema.parse(req.body);
+  if (!req.user) throw HttpError.unauthorized('Sign in to authorise an audit.');
+  res.json(await authoriseAudit(supplierId, body, req.user.id));
 }

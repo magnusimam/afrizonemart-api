@@ -6,6 +6,9 @@ import { HttpError } from '@/middleware/error-handler';
 import { eventBus } from '@/infra/eventBus';
 import { logger } from '@/infra/logger';
 import { prisma } from '@/infra/prisma';
+// Safe direction: suppliers/notify pulls only env/logger/prisma/notifications,
+// never auth — so this doesn't close an import cycle.
+import { notifySupplierPasswordChanged, notifySupplierWelcome } from '@/modules/suppliers/notify';
 import {
   signAccessToken,
   signRefreshToken,
@@ -367,4 +370,32 @@ export async function resetPassword(body: ResetPasswordBody): Promise<void> {
       data: { usedAt: new Date() },
     }),
   ]);
+
+  // Post-reset mail. Deliberately after the transaction and never awaited into
+  // it: a mail failure must not roll back a password the user has already been
+  // told was changed. `sendEmail` swallows its own errors, so this can't throw.
+  const user = await prisma.user.findUnique({
+    where: { id: record.userId },
+    select: { email: true, name: true, supplierProfile: { select: { contactName: true, currentStage: true } } },
+  });
+  if (!user) return;
+
+  await notifySupplierPasswordChanged({
+    to: user.email,
+    userId: record.userId,
+    recipientName: user.name ?? user.supplierProfile?.contactName ?? 'there',
+    changedAt: new Date(),
+  });
+
+  // An invited supplier reaches this endpoint to set their *first* password —
+  // that's the moment to orient them in the 10-stage journey. The once-ever
+  // guard inside means a later genuine password reset won't re-welcome them.
+  if (user.supplierProfile) {
+    await notifySupplierWelcome({
+      to: user.email,
+      userId: record.userId,
+      recipientName: user.name ?? user.supplierProfile.contactName,
+      currentStage: user.supplierProfile.currentStage,
+    });
+  }
 }

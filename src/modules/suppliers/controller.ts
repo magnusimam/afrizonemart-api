@@ -16,6 +16,7 @@ import {
   createPIQ,
   getAudit,
   getPIQ,
+  getProductionBooking,
   getStageAnswers,
   getSupplierByUserId,
   getVisit,
@@ -113,6 +114,15 @@ const requestVisitBody = z.object({
 export async function getVisitHandler(req: AuthedRequest, res: Response): Promise<void> {
   if (!req.user) throw HttpError.unauthorized();
   res.json({ visit: await getVisit(req.user.id) });
+}
+
+/** GET /api/suppliers/me/production — the supplier's Take50 shoot (null until booked). */
+export async function getProductionBookingHandler(
+  req: AuthedRequest,
+  res: Response,
+): Promise<void> {
+  if (!req.user) throw HttpError.unauthorized();
+  res.json({ booking: await getProductionBooking(req.user.id) });
 }
 
 /** POST /api/suppliers/me/visit/request — propose a date. */

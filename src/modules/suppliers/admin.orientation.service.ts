@@ -107,6 +107,7 @@ export async function scheduleReviewCall(
     scheduledAt: when,
     meetingMode: rc.meetingMode,
     meetingLink: rc.meetingLink,
+    supplierId,
   });
 
   return toPublicReviewCall(rc);
