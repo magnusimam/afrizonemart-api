@@ -56,6 +56,8 @@ interface Report {
  * and the thing a human can verify at a glance.
  */
 const MATCH_OVERRIDES: Record<string, string> = {
+  SHEACOCO: 'sheacocointernational@gmail.com',
+  AMINERU: 'aminerunigent@yahoo.com',
   'AVIS FOODS': 'goretylux77@gmail.com',
   'JVV FOODS': 'jvvfoodltd@gmail.com',
   'P.P. FOODS': 'ppinternationalfoods@gmail.com',

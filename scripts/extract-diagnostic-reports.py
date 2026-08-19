@@ -204,6 +204,87 @@ def parse(path: Path) -> dict:
     return doc
 
 
+
+# ---- PDF reports -----------------------------------------------------
+#
+# One report in the first cohort was issued as a PDF rather than .docx. A PDF
+# carries no table structure, only positioned text, so the checkpoint matrix is
+# recovered by pattern rather than by cell.
+#
+# Counts are computed from the recovered ratings instead of scraped from the
+# summary panel. Scraping that panel missed a Critical finding the matrix
+# plainly showed, and a report that under-states its own criticals is worse
+# than one that fails to import.
+PDF_ROW = re.compile(
+    r'([A-L]\.\d{1,2})\s+(.{10,120}?)\s+'
+    r'(COMPLIANT|CRITICAL|MAJOR|MINOR|OBSERVATION|NOT APPLIC\.?)',
+)
+
+
+def parse_pdf(path):
+    try:
+        import PyPDF2
+    except ImportError:
+        print(f'  skip  {path.name} (PyPDF2 not installed)')
+        return None
+
+    reader = PyPDF2.PdfReader(str(path))
+    flat = re.sub(r'\s+', ' ', ' '.join((pg.extract_text() or '') for pg in reader.pages))
+
+    doc = {'file': path.name, 'sourceFormat': 'pdf'}
+
+    m = re.search(r'(AFZ-QA-[A-Z]+-\d+)\s*/\s*(DR-[A-Z0-9-]+)', flat)
+    if m:
+        doc['protocolCode'], doc['documentCode'] = m.group(1), m.group(2)
+
+    m = re.search(r'PREPARED FOR\s+(.{3,60}?)\s+(?:Manufacturer|Producer|Packager|DOCUMENT)', flat)
+    if m:
+        doc['company'] = m.group(1).strip()
+
+    m = re.search(r'ASSESSMENT PROTOCOL\s+(.{5,70}?)\s+ASSESSMENT TYPE', flat)
+    if m:
+        doc['protocolName'] = m.group(1).strip()
+
+    m = re.search(r'ISSUE DATE\s+(\d{1,2} \w+ \d{4})', flat)
+    if m:
+        doc['issueDate'] = m.group(1)
+
+    m = re.search(r'\b(REJECTED|APPROVED|CONDITIONAL)\b', flat)
+    if m:
+        doc['outcomeText'] = m.group(1)
+        doc['outcome'] = m.group(1).upper()
+
+    m = re.search(r'(\d{1,3}(?:\.\d)?)\s*/\s*100', flat)
+    if m:
+        doc['indicativeScore'] = float(m.group(1))
+
+    responses = {}
+    for ref, requirement, rating in PDF_ROW.findall(flat):
+        code = RATING.get(rating.upper()) or RATING.get(rating.upper().rstrip('.'))
+        if code is None:
+            continue
+        responses[ref] = {'rating': code, 'requirement': requirement.strip()}
+    doc['responses'] = responses
+    doc['checkpointCount'] = len(responses)
+
+    vals = [r['rating'] for r in responses.values()]
+    doc['counts'] = {
+        'critical': vals.count('C'),
+        'major': vals.count('M'),
+        'minor': vals.count('Mi'),
+        'observation': vals.count('O'),
+        'compliant': vals.count('Cpt'),
+        'na': vals.count('NA'),
+    }
+
+    m = re.search(r'Executive Summary\s+(.{80,900}?)(?:ASSESSMENT OUTCOME|Headline Findings)', flat)
+    doc['executiveSummary'] = m.group(1).strip() if m else None
+    doc['whatThisMeans'] = None
+    doc['headlineFindings'] = []
+    doc['capa'] = []
+    doc['capaCount'] = 0
+    return doc
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -214,11 +295,16 @@ def main():
         out_path = Path(sys.argv[sys.argv.index('-o') + 1])
 
     docs = []
-    for f in sorted(folder.rglob('*.docx')):
+    # PDFs as well as .docx: one report in the first cohort was issued as a PDF.
+    candidates = sorted(list(folder.rglob('*.docx')) + list(folder.rglob('*.pdf')))
+    for f in candidates:
+        # Word lock files (~$Name.docx) are not documents.
         if f.name.startswith('~$'):
             continue
         try:
-            d = parse(f)
+            d = parse_pdf(f) if f.suffix.lower() == '.pdf' else parse(f)
+            if d is None:
+                continue
         except Exception as e:  # noqa: BLE001 - report and continue
             print(f'  FAIL  {f.name}: {e}')
             continue
