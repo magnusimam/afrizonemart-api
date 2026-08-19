@@ -56,6 +56,8 @@ interface Report {
  * and the thing a human can verify at a glance.
  */
 const MATCH_OVERRIDES: Record<string, string> = {
+  // Confirmed the same business, trading under a second name.
+  'RITZY FOODS': 'ritzygroup2017@gmail.com',
   SHEACOCO: 'sheacocointernational@gmail.com',
   AMINERU: 'aminerunigent@yahoo.com',
   'AVIS FOODS': 'goretylux77@gmail.com',

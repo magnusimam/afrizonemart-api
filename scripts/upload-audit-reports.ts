@@ -45,6 +45,7 @@ const folderArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
  * written down and reviewable rather than inferred.
  */
 const FILE_TO_EMAIL: Record<string, string> = {
+  Ritzy_Foods: 'ritzygroup2017@gmail.com',
   Sheacoco: 'sheacocointernational@gmail.com',
   Avis_Foods: 'goretylux77@gmail.com',
   Eden_Foods: 'edenwholefoodsng@gmail.com',

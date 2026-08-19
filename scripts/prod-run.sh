@@ -55,4 +55,8 @@ export AZM_PROD_DB="$PUBLIC_DB"
 
 # railway run sets DATABASE_URL to the internal host; overriding it on the
 # child command's own line is what makes ours win.
-railway run -- bash -c "DATABASE_URL=\"\$AZM_PROD_DB\" $*"
+# %q-quote every argument. Plain $* re-splits on spaces inside bash -c,
+# which silently truncated --signed-by="Obinna Okehie" to "Obinna" --
+# a legal signature, cut in half without an error.
+QUOTED=$(printf '%q ' "$@")
+railway run -- bash -c "DATABASE_URL=\"\$AZM_PROD_DB\" $QUOTED"
