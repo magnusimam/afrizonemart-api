@@ -73,7 +73,7 @@ export async function getInternQueue(internId: string) {
       // can PATCH these via the existing admin endpoints.
       price: true,
       comparePrice: true,
-      category: { select: { slug: true, name: true } },
+      category: { select: { slug: true, name: true, minImages: true } },
       images: true,
       imageSubmissions: {
         where: { internId },
@@ -535,18 +535,30 @@ export async function reassign(body: ReassignBody, actorUserId: string | null) {
     return { moved: 0, perIntern: {}, returnedToPool: 0, alreadyImagedCount: 0 };
   }
 
-  /// Same "already done" signal as `bulkAssign` — `mode: 'all'` (or an
-  /// explicit `productIds` list) can move products that already have
-  /// enough approved images, since neither path filters on image
-  /// count. Not blocked (an admin may genuinely want to move
-  /// in-progress-but-complete work for reshoots), just surfaced.
+  /// Same "already done" signal as `bulkAssign` — moving a product
+  /// that already clears its category's image threshold just dumps
+  /// finished work back into someone's "to do" list with no
+  /// submission on file (surfaced Ife's queue confusion 2026-08-17,
+  /// alreadyImagedCount: 2 on that move). Dropped from the move by
+  /// default; `includeAlreadyImaged` opts back in for deliberate
+  /// reshoots/brand-logo backfills.
   const movedProducts = await prisma.product.findMany({
     where: { id: { in: productIds } },
     select: { id: true, images: true, category: { select: { minImages: true } } },
   });
-  const alreadyImagedCount = movedProducts.filter(
-    (p) => p.images.length >= (p.category?.minImages ?? 3),
-  ).length;
+  const alreadyImagedIds = new Set(
+    movedProducts
+      .filter((p) => p.images.length >= (p.category?.minImages ?? 3))
+      .map((p) => p.id),
+  );
+  const alreadyImagedCount = alreadyImagedIds.size;
+  if (!body.includeAlreadyImaged && alreadyImagedIds.size > 0) {
+    productIds = productIds.filter((id) => !alreadyImagedIds.has(id));
+  }
+
+  if (productIds.length === 0) {
+    return { moved: 0, perIntern: {}, returnedToPool: 0, alreadyImagedCount };
+  }
 
   if (!body.toInternIds || body.toInternIds.length === 0) {
     // Send back to the unassigned pool.
