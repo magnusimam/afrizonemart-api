@@ -80,6 +80,11 @@ export const reassignBodySchema = z.object({
   /// default to unstarted because moving in-flight work breaks payment
   /// attribution.
   mode: z.enum(['unstarted', 'all']).default('unstarted'),
+  /// By default, products that already clear their category's image
+  /// threshold are dropped from the move — reassigning them just dumps
+  /// finished work back into someone's "to do" list. Set true to move
+  /// them anyway (e.g. deliberate reshoots/brand-logo backfills).
+  includeAlreadyImaged: z.boolean().default(false),
 });
 export type ReassignBody = z.infer<typeof reassignBodySchema>;
 
