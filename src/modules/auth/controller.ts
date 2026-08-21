@@ -1,5 +1,5 @@
 import type { CookieOptions, Request, Response } from 'express';
-import { isProduction } from '@/config/env';
+import { env, isProduction } from '@/config/env';
 import { HttpError } from '@/middleware/error-handler';
 import type { AuthedRequest } from '@/middleware/auth';
 import { z } from 'zod';
@@ -29,11 +29,42 @@ import { deleteOwnAccount } from './delete-account.service';
 
 const REFRESH_COOKIE = 'azm_refresh';
 
+/**
+ * Parent domain the refresh cookie is scoped to, derived from WEB_URL.
+ *
+ * Derived rather than hardcoded so a staging deploy on another domain keeps
+ * working. Returns null for a bare host or an IP, where a domain attribute
+ * would be invalid and host-only is correct anyway.
+ */
+const COOKIE_DOMAIN = (() => {
+  try {
+    const host = new URL(env.WEB_URL).hostname;
+    if (/^[\d.]+$/.test(host) || !host.includes('.')) return null;
+    const parts = host.split('.');
+    // eTLD+1 for the common cases: example.com, example.co.uk.
+    const base = parts.slice(-(parts.length >= 3 && parts.at(-2)!.length <= 3 ? 3 : 2));
+    return `.${base.join('.')}`;
+  } catch {
+    return null;
+  }
+})();
+
 function refreshCookieOptions(): CookieOptions {
   return {
     httpOnly: true,
     secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax',
+    // `none` made this a third-party cookie, and Safari blocks those by
+    // default. The effect was invisible and expensive: a supplier signed in
+    // fine (the access token comes back in the body and lives in memory), and
+    // then everything they typed after the token expired 15 minutes later
+    // silently stopped saving, because the refresh call had no cookie to send.
+    // Long forms on an iPad were the worst case.
+    //
+    // afrizonemart.com and api.afrizonemart.com share a registrable domain, so
+    // these requests were same-site all along. Scoping the cookie to the parent
+    // domain makes that explicit and takes it out of third-party territory.
+    sameSite: 'lax',
+    ...(isProduction && COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
     // Phase 11.3 (audit M8): widened from `/api/auth` to `/api`. The
     // narrower path was fragile — a future endpoint outside `/api/auth`
     // that wants to read or rotate the refresh cookie would silently
