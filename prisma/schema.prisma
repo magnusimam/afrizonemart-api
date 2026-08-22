@@ -55,6 +55,17 @@ model User {
   /// a label + preset trigger — does NOT itself grant access; the
   /// permissions array is still what's checked at request time.
   department       String?
+  /// When this account actually became staff — distinct from
+  /// `createdAt`, which for anyone promoted from an existing customer
+  /// account (the `createStaff` CUSTOMER_EXISTS flow) is their original
+  /// shopper signup date, not when they started working. Stamped at
+  /// promotion/creation time; never overwritten once set, so a later
+  /// role edit (e.g. STAFF -> ADMIN) doesn't reset it. Null only for
+  /// non-staff accounts (CUSTOMER) and legacy rows predating this field
+  /// (see the 20260822_staff_since migration for the backfill: earliest
+  /// of first ProductImageSubmission/ProductSubmission/DocumentSubmission,
+  /// falling back to createdAt).
+  staffSince       DateTime?
   // Refresh tokens are hashed before storage so a DB leak doesn't grant
   // session access. Null when the user has logged out everywhere.
   refreshTokenHash String?
