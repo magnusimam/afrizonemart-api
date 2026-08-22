@@ -32,6 +32,7 @@ export async function listStaff() {
       department: true,
       permissions: true,
       createdAt: true,
+      staffSince: true,
     },
   });
   // Surface effective capabilities so the admin UI can show "what they
@@ -58,6 +59,7 @@ export async function getStaff(id: string) {
       department: true,
       permissions: true,
       createdAt: true,
+      staffSince: true,
     },
   });
   if (!u) throw HttpError.notFound('Staff member not found');
@@ -81,12 +83,13 @@ const STAFF_SELECT = {
   department: true,
   permissions: true,
   createdAt: true,
+  staffSince: true,
 } as const;
 
 export async function createStaff(body: CreateStaffBody) {
   const existing = await prisma.user.findUnique({
     where: { email: body.email },
-    select: { id: true, email: true, role: true, name: true },
+    select: { id: true, email: true, role: true, name: true, staffSince: true },
   });
 
   if (existing) {
@@ -110,6 +113,10 @@ export async function createStaff(body: CreateStaffBody) {
     }
     // Promote: keep their account, orders + existing login untouched;
     // just elevate role + grant permissions + set the job title.
+    // staffSince is stamped now (this is the moment they actually
+    // become staff) rather than left as their original customer
+    // signup date — never overwritten if a prior promotion already
+    // set it (e.g. STAFF -> CUSTOMER -> STAFF again).
     const promoted = await prisma.user.update({
       where: { id: existing.id },
       data: {
@@ -118,6 +125,7 @@ export async function createStaff(body: CreateStaffBody) {
         department: body.department ?? null,
         permissions: body.role === 'STAFF' ? body.permissions ?? [] : [],
         ...(body.name ? { name: body.name } : {}),
+        ...(existing.staffSince ? {} : { staffSince: new Date() }),
       },
       select: STAFF_SELECT,
     });
@@ -150,6 +158,9 @@ export async function createStaff(body: CreateStaffBody) {
       // STAFF role uses per-user permissions; SELLER/ADMIN ignore them
       // (their effective set comes from ROLE_CAPABILITIES).
       permissions: body.role === 'STAFF' ? body.permissions ?? [] : [],
+      // Brand-new account created directly as staff — same moment as
+      // createdAt, but explicit rather than left null.
+      staffSince: new Date(),
     },
     select: {
       id: true,
@@ -160,6 +171,7 @@ export async function createStaff(body: CreateStaffBody) {
       department: true,
       permissions: true,
       createdAt: true,
+      staffSince: true,
     },
   });
 
@@ -214,7 +226,7 @@ async function sendStaffInvite(args: {
 export async function updateStaff(id: string, body: UpdateStaffBody) {
   const existing = await prisma.user.findUnique({
     where: { id },
-    select: { id: true, role: true },
+    select: { id: true, role: true, staffSince: true },
   });
   if (!existing) throw HttpError.notFound('Staff member not found');
 
@@ -235,9 +247,16 @@ export async function updateStaff(id: string, body: UpdateStaffBody) {
     passwordHash?: string;
     jobTitle?: string | null;
     department?: string | null;
+    staffSince?: Date;
   } = {};
   if (body.name !== undefined) data.name = body.name;
-  if (body.role !== undefined) data.role = body.role;
+  if (body.role !== undefined) {
+    data.role = body.role;
+    // Covers the (currently unused by the UI, but reachable) case of
+    // flipping a CUSTOMER straight to a staff role through this
+    // endpoint rather than the dedicated createStaff promotion path.
+    if (!existing.staffSince) data.staffSince = new Date();
+  }
   if (body.jobTitle !== undefined) data.jobTitle = body.jobTitle;
   if (body.department !== undefined) data.department = body.department;
   if (body.permissions !== undefined) {
@@ -266,6 +285,7 @@ export async function updateStaff(id: string, body: UpdateStaffBody) {
       department: true,
       permissions: true,
       createdAt: true,
+      staffSince: true,
     },
   });
   return {
